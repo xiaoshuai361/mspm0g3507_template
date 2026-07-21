@@ -1,0 +1,49 @@
+################################################################################
+# User-maintained build rules for files not yet regenerated into Debug/*.mk.
+################################################################################
+
+./BSP/DL1B/%.o: ../BSP/DL1B/%.c
+	@echo 'Arm Compiler - building file: "$<"'
+	@mkdir "BSP\DL1B" 2>NUL || exit 0
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../BSP/DL1B" -I"../Module/ToF" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"$(@:%.o=%.d_raw)" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./BSP/DL1A/%.o: ../BSP/DL1A/%.c
+	@echo 'Arm Compiler - building file: "$<"'
+	@mkdir "BSP\DL1A" 2>NUL || exit 0
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../BSP/DL1A" -I"../BSP/SoftI2C" -I"../Module/ToF" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"$(@:%.o=%.d_raw)" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./Module/ToF/%.o: ../Module/ToF/%.c
+	@echo 'Arm Compiler - building file: "$<"'
+	@mkdir "Module\ToF" 2>NUL || exit 0
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../BSP/DL1A" -I"../BSP/DL1B" -I"../Module/ToF" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"$(@:%.o=%.d_raw)" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./App/app_vehicle.o: ../App/app_vehicle.c
+	@echo 'Arm Compiler - building file: "$<"'
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../Module/LineTrace" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"App/app_vehicle.d_raw" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./Module/LineTrace/%.o: ../Module/LineTrace/%.c
+	@echo 'Arm Compiler - building file: "$<"'
+	@mkdir "Module\LineTrace" 2>NUL || exit 0
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../Module/LineTrace" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"$(@:%.o=%.d_raw)" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./tests/dl1b_test.o: ../tests/dl1b_test.c
+	@echo 'Arm Compiler - building file: "$<"'
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../Module/ToF" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"tests/dl1b_test.d_raw" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
+./tests/line_trace_test.o: ../tests/line_trace_test.c
+	@echo 'Arm Compiler - building file: "$<"'
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../Module/LineTrace" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"tests/line_trace_test.d_raw" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '

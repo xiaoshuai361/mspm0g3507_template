@@ -1,0 +1,29 @@
+# Local machine configuration
+.vscode/local.env.json
+
+# CCS / SysConfig generated build outputs
+Debug/
+Release/
+Objects/
+Listings/
+
+# Local caches and downloaded installers
+.headroom-cache/
+installers/
+
+# Firmware and compiler artifacts
+*.out
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.obj
+*.d
+*.d_raw
+*.lst
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

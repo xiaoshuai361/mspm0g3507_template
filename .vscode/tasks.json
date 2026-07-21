@@ -1,0 +1,245 @@
+﻿{
+    "version":  "2.0.0",
+    "tasks":  [
+                  {
+                      "label":  "Build: CCS Debug",
+                      "type":  "process",
+                      "command":  "powershell.exe",
+                      "args":  [
+                                   "-NoProfile",
+                                   "-ExecutionPolicy",
+                                   "Bypass",
+                                   "-File",
+                                   "${workspaceFolder}/.vscode/scripts/build-ccs-debug.ps1",
+                                   "-WorkspaceFolder",
+                                   "${workspaceFolder}",
+                                   "-Gmake",
+                                   "D:/APPs/TI/CCS/ccs/utils/bin/gmake.exe",
+                                   "-Jobs",
+                                   "4"
+                               ],
+                      "group":  {
+                                    "kind":  "build",
+                                    "isDefault":  true
+                                },
+                      "problemMatcher":  [
+                                             "$gcc"
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(tools) Build",
+                                                        "detail":  "Build CCS Debug project",
+                                                        "color":  "#8FD694",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) Build",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Build current CCS Debug project with TI Arm Clang."
+                  },
+                  {
+                      "label":  "Clean: CCS Debug",
+                      "type":  "process",
+                      "command":  "D:/APPs/TI/CCS/ccs/utils/bin/gmake.exe",
+                      "args":  [
+                                   "-C",
+                                   "${workspaceFolder}/Debug",
+                                   "clean"
+                               ],
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(trash) Clean",
+                                                        "detail":  "Clean CCS Debug output",
+                                                        "color":  "#C792EA",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) Clean",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Clean CCS Debug build output."
+                  },
+                  {
+                      "label":  "Rebuild: CCS Debug",
+                      "type":  "shell",
+                      "dependsOn":  [
+                                        "Clean: CCS Debug",
+                                        "Build: CCS Debug"
+                                    ],
+                      "dependsOrder":  "sequence",
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(refresh) Rebuild",
+                                                        "detail":  "Clean then build",
+                                                        "color":  "#82AAFF",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) Rebuild",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Clean and rebuild."
+                  },
+                  {
+                      "label":  "Open SysConfig",
+                      "type":  "process",
+                      "command":  "powershell.exe",
+                      "args":  [
+                                   "-NoProfile",
+                                   "-ExecutionPolicy",
+                                   "Bypass",
+                                   "-File",
+                                   "${workspaceFolder}/.vscode/scripts/open-sysconfig.ps1",
+                                   "-WorkspaceFolder",
+                                   "${workspaceFolder}",
+                                   "-SdkProduct",
+                                   "D:/APPs/TI/CCS/mspm0_sdk_2_07_00_05/.metadata/product.json",
+                                   "-SysConfigRoot",
+                                   "D:/APPs/TI/sysconfig_1.27.1"
+                               ],
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(settings-gear) SysConfig",
+                                                        "detail":  "Open empty.syscfg GUI",
+                                                        "color":  "#7FDBCA",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) SysConfig",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Open empty.syscfg in standalone SysConfig GUI."
+                  },
+                  {
+                      "label":  "SysConfig: Generate",
+                      "type":  "process",
+                      "command":  "cmd.exe",
+                      "args":  [
+                                   "/d",
+                                   "/c",
+                                   "${workspaceFolder}/.vscode/scripts/sysconfig-generate.cmd",
+                                   "${workspaceFolder}",
+                                   "D:/APPs/TI/sysconfig_1.27.1/sysconfig_cli.bat",
+                                   "D:/APPs/TI/CCS/mspm0_sdk_2_07_00_05/.metadata/product.json",
+                                   "${workspaceFolder}/Debug/syscfg"
+                               ],
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(file-code) Gen",
+                                                        "detail":  "Generate Debug/syscfg files",
+                                                        "color":  "#B2CCD6",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) Gen",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Regenerate SysConfig output."
+                  },
+                  {
+                      "label":  "Flash: J-Link DSLite (Recommended)",
+                      "type":  "process",
+                      "command":  "cmd.exe",
+                      "args":  [
+                                   "/d",
+                                   "/c",
+                                   "${workspaceFolder}/.vscode/scripts/flash-dslite-jlink.cmd",
+                                   "${workspaceFolder}",
+                                   "D:/APPs/TI/Unflsh/dslite.bat"
+                               ],
+                      "dependsOn":  "Build: CCS Debug",
+                      "dependsOrder":  "sequence",
+                      "group":  "test",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  false,
+                                                        "label":  "$(zap) Flash",
+                                                        "detail":  "J-Link + DSLite flash and run",
+                                                        "color":  "#FFCB6B",
+                                                        "running":  {
+                                                                        "label":  "$(sync~spin) Flash",
+                                                                        "color":  "#FFD166"
+                                                                    }
+                                                    }
+                                  },
+                      "detail":  "Recommended flash path: CCS/UniFlash DSLite + J-Link."
+                  },
+                  {
+                      "label":  "Flash: J-Link OpenOCD",
+                      "type":  "process",
+                      "command":  "cmd.exe",
+                      "args":  [
+                                   "/d",
+                                   "/c",
+                                   "${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd",
+                                   "${workspaceFolder}",
+                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
+                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts",
+                                   "40000"
+                               ],
+                      "dependsOn":  "Build: CCS Debug",
+                      "dependsOrder":  "sequence",
+                      "group":  "test",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  true
+                                                    }
+                                  },
+                      "detail":  "Experimental J-Link + OpenOCD flash."
+                  },
+                  {
+                      "label":  "Flash: J-Link OpenOCD Safe",
+                      "type":  "process",
+                      "command":  "cmd.exe",
+                      "args":  [
+                                   "/d",
+                                   "/c",
+                                   "${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd",
+                                   "${workspaceFolder}",
+                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
+                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts",
+                                   "8000"
+                               ],
+                      "dependsOn":  "Build: CCS Debug",
+                      "dependsOrder":  "sequence",
+                      "group":  "test",
+                      "problemMatcher":  [
+
+                                         ],
+                      "options":  {
+                                      "statusbar":  {
+                                                        "hide":  true
+                                                    }
+                                  },
+                      "detail":  "Experimental J-Link + OpenOCD safe-speed flash."
+                  }
+              ]
+}

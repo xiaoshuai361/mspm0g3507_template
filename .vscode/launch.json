@@ -1,0 +1,63 @@
+﻿{
+    "version":  "0.2.0",
+    "configurations":  [
+                           {
+                               "name":  "Debug: J-Link OpenOCD",
+                               "type":  "cortex-debug",
+                               "request":  "launch",
+                               "servertype":  "openocd",
+                               "cwd":  "${workspaceFolder}",
+                               "executable":  "${workspaceFolder}/Debug/cy_template.out",
+                               "device":  "MSPM0G3507",
+                               "runToEntryPoint":  "main",
+                               "preLaunchTask":  "Build: CCS Debug",
+                               "serverpath":  "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
+                               "gdbPath":  "F:/APPS/arm-none-eabi-gcc/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gdb.exe",
+                               "armToolchainPath":  "F:/APPS/arm-none-eabi-gcc/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin",
+                               "objdumpPath":  "F:/APPS/arm-none-eabi-gcc/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-objdump.exe",
+                               "searchDir":  [
+                                                 "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts"
+                                             ],
+                               "configFiles":  [
+                                                   "interface/jlink.cfg",
+                                                   "target/ti_mspm0.cfg"
+                                               ],
+                               "serverArgs":  [
+                                                  "-c",
+                                                  "transport select swd",
+                                                  "-c",
+                                                  "adapter speed 40000"
+                                              ],
+                               "showDevDebugOutput":  "none",
+                               "liveWatch":  {
+                                                 "enabled":  false,
+                                                 "samplesPerSecond":  4
+                                             }
+                           },
+                           {
+                               "name":  "Debug: DAPLink OpenOCD (澶囩敤)",
+                               "type":  "cortex-debug",
+                               "request":  "launch",
+                               "servertype":  "openocd",
+                               "cwd":  "${workspaceFolder}",
+                               "executable":  "${workspaceFolder}/Debug/cy_template.out",
+                               "device":  "MSPM0G3507",
+                               "runToEntryPoint":  "main",
+                               "preLaunchTask":  "Build: CCS Debug",
+                               "serverpath":  "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
+                               "gdbPath":  "F:/APPS/arm-none-eabi-gcc/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gdb.exe",
+                               "searchDir":  [
+                                                 "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts"
+                                             ],
+                               "configFiles":  [
+                                                   "interface/cmsis-dap.cfg",
+                                                   "target/ti_mspm0.cfg"
+                                               ],
+                               "serverArgs":  [
+                                                  "-c",
+                                                  "adapter speed 8000"
+                                              ],
+                               "showDevDebugOutput":  "none"
+                           }
+                       ]
+}

@@ -1,0 +1,87 @@
+################################################################################
+# User-maintained build extensions.
+# CCS-generated Debug/makefile includes this file; do not edit Debug/*.mk.
+################################################################################
+
+DL1B_EXTRA_OBJS := \
+./BSP/DL1B/bsp_dl1b.o \
+./Module/ToF/dl1b.o \
+./Module/ToF/dl1b_config.o \
+./tests/dl1b_test.o
+
+DL1B_EXTRA_DEPS := \
+./BSP/DL1B/bsp_dl1b.d \
+./Module/ToF/dl1b.d \
+./Module/ToF/dl1b_config.d \
+./tests/dl1b_test.d
+
+DL1A_EXTRA_OBJS := \
+./BSP/DL1A/bsp_dl1a.o \
+./Module/ToF/dl1a.o \
+./tests/dl1a_test.o
+
+DL1A_EXTRA_DEPS := \
+./BSP/DL1A/bsp_dl1a.d \
+./Module/ToF/dl1a.d \
+./tests/dl1a_test.d
+
+APP_EXTRA_OBJS := \
+./App/app_input.o \
+./App/app_menu.o \
+./App/app_imu.o \
+./App/app_tof.o
+
+APP_EXTRA_DEPS := \
+./App/app_input.d \
+./App/app_menu.d \
+./App/app_imu.d \
+./App/app_tof.d
+
+VEHICLE_EXTRA_OBJS := \
+./App/app_vehicle.o
+
+VEHICLE_EXTRA_DEPS := \
+./App/app_vehicle.d
+
+LINE_TRACE_EXTRA_OBJS := \
+./Module/LineTrace/line_trace.o \
+./tests/line_trace_test.o
+
+LINE_TRACE_EXTRA_DEPS := \
+./Module/LineTrace/line_trace.d \
+./tests/line_trace_test.d
+
+ifeq ($(findstring Module/ToF/dl1b.o,$(ORDERED_OBJS)),)
+OBJS += $(DL1B_EXTRA_OBJS)
+C_DEPS += $(DL1B_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(DL1B_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring Module/ToF/dl1a.o,$(ORDERED_OBJS)),)
+OBJS += $(DL1A_EXTRA_OBJS)
+C_DEPS += $(DL1A_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(DL1A_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring App/app_menu.o,$(ORDERED_OBJS)),)
+OBJS += $(APP_EXTRA_OBJS)
+C_DEPS += $(APP_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(APP_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring App/app_vehicle.o,$(ORDERED_OBJS)),)
+OBJS += $(VEHICLE_EXTRA_OBJS)
+C_DEPS += $(VEHICLE_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(VEHICLE_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring tests/line_trace_test.o,$(ORDERED_OBJS)),)
+OBJS += $(LINE_TRACE_EXTRA_OBJS)
+C_DEPS += $(LINE_TRACE_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(LINE_TRACE_EXTRA_OBJS)
+endif

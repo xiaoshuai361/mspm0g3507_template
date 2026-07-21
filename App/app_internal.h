@@ -1,0 +1,70 @@
+#ifndef APP_APP_INTERNAL_H
+#define APP_APP_INTERNAL_H /**< APP_APP_INTERNAL_H 应用层配置宏。 */
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "app_config.h"
+#include "key5d.h"
+#include "menu.h"
+
+extern volatile uint32_t g_app_sample_count; /**< 按键采样累计次数。 */
+
+/* 初始化五向按键状态机和诊断数据。 */
+/**
+ * @brief 执行 App  Input Init 功能。
+ * @param 无。
+ * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @retval 无。
+ */
+void App_InputInit(void);
+
+/* 按固定周期读取按键 ADC，并更新消抖状态和边沿事件。 */
+bool App_InputPoll(uint32_t now, Key5D_Event *event);
+
+/* 获取当前消抖后的稳定按键。 */
+/**
+ * @brief 执行 App  Input Get Stable Key 功能。
+ * @param 无。
+ * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @retval 返回执行结果或状态。
+ */
+Key5D_Key App_InputGetStableKey(void);
+
+/* 获取最近一次按键 ADC 原始值。 */
+uint16_t App_InputGetLastAdc(void);
+
+/* 获取五向按键诊断结构体，用于 OLED 测试页显示。 */
+/**
+ * @brief 执行 App  Input Get Diagnostic 功能。
+ * @param 无。
+ * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @retval 返回执行结果或状态。
+ */
+const Key5D_Diagnostic *App_InputGetDiagnostic(void);
+
+/* 将五向按键方向转换成菜单输入事件。 */
+Menu_Input App_InputToMenu(Key5D_Key key);
+
+/* 串口输出一次按键按下事件，并翻转板载 LED。 */
+/**
+ * @brief 执行 App  Log Key Press 功能。
+ * @param key 按键方向。
+ * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @retval 无。
+ */
+void App_LogKeyPress(Key5D_Key key);
+
+/* 初始化菜单状态和默认显示参数。 */
+void App_MenuInitData(void);
+
+/* 将最近一次按键 ADC 值同步到菜单显示数据中。 */
+/**
+ * @brief 执行 App  Menu Set Key Adc 功能。
+ * @param rawAdc ADC 原始值。
+ * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @retval 无。
+ */
+void App_MenuSetKeyAdc(uint16_t rawAdc);
+
+#endif
