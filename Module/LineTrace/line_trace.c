@@ -9,6 +9,10 @@
 #define LINE_TRACE_BIT_GO_LEFT_2  (6U) /**< LINE_TRACE_BIT_GO_LEFT_2 模块配置或状态宏。 */
 #define LINE_TRACE_BIT_TURN_LEFT  (7U) /**< LINE_TRACE_BIT_TURN_LEFT 模块配置或状态宏。 */
 
+static const int16_t lineTraceWeightsTenths[8] = {
+    35, 25, 15, 5, -5, -15, -25, -35
+}; /**< bit0~bit7 的位置权重，单位 0.1 路间距；右正左负。 */
+
 /**
  * @brief 读取 raw 中指定 bit，返回 0/1。
  * @param raw 原始传感器数据。
@@ -64,6 +68,51 @@ LineTrace_State LineTrace_DecodeState(uint8_t raw)
 LineTrace_State LineTrace_DecodeActiveLowRaw(uint8_t raw)
 {
     return LineTrace_DecodeState((uint8_t)~raw);
+}
+
+uint8_t LineTrace_CalcWeightedError(uint8_t raw, int16_t *errorTenths, uint8_t *activeCount)
+{
+    int16_t weightedSum = 0;
+    uint8_t count = 0U;
+    uint8_t bit;
+
+    if (errorTenths == 0)
+    {
+        if (activeCount != 0) {
+            *activeCount = 0U;
+        }
+        return 0U;
+    }
+
+    for (bit = 0U; bit < 8U; bit++)
+    {
+        if (LineTrace_Bit(raw, bit) != 0U)
+        {
+            weightedSum = (int16_t)(weightedSum + lineTraceWeightsTenths[bit]);
+            count++;
+        }
+    }
+
+    if (count == 0U)
+    {
+        *errorTenths = 0;
+        if (activeCount != 0) {
+            *activeCount = 0U;
+        }
+        return 0U;
+    }
+
+    *errorTenths = (int16_t)(weightedSum / (int16_t)count);
+    if (activeCount != 0) {
+        *activeCount = count;
+    }
+
+    return 1U;
+}
+
+uint8_t LineTrace_CalcActiveLowWeightedError(uint8_t raw, int16_t *errorTenths, uint8_t *activeCount)
+{
+    return LineTrace_CalcWeightedError((uint8_t)~raw, errorTenths, activeCount);
 }
 
 const char *LineTrace_StateName(LineTrace_State state)

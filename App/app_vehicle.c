@@ -18,6 +18,8 @@ volatile uint8_t g_vehicle_follow_enabled;  /**< 循迹模式使能标志。 */
 volatile uint8_t g_vehicle_last_bt_command; /**< 最近一次蓝牙命令。 */
 volatile uint8_t g_vehicle_line_raw;        /**< 灰度传感器原始 8 位值。 */
 volatile uint8_t g_vehicle_line_state;      /**< 循迹状态枚举值。 */
+volatile int16_t g_vehicle_line_error_tenths; /**< 加权循迹偏差，单位 0.1 路间距，左负右正。 */
+volatile uint8_t g_vehicle_line_active_count; /**< 当前检测到黑线的灰度通道数量。 */
 
 static bool vehicleInitialized;                         /**< 车辆外设和控制状态已初始化标志。 */
 static float standardSpeed = APP_VEHICLE_DEFAULT_SPEED; /**< 蓝牙手动控制和循迹控制使用的基准速度。 */
@@ -49,6 +51,26 @@ static PID_t rightSpeedPid = {
     .ErrMax = APP_VEHICLE_PID_ERR_MAX,
     .DeltaMax = APP_VEHICLE_PID_DELTA_MAX,
 };
+
+/**
+ * @brief 对 float 数值做上下限裁剪。
+ * @param value 待裁剪数值。
+ * @param minValue 最小值。
+ * @param maxValue 最大值。
+ * @retval 裁剪后的数值。
+ */
+static float App_VehicleClampFloat(float value, float minValue, float maxValue)
+{
+    if (value > maxValue)
+    {
+        return maxValue;
+    }
+    if (value < minValue)
+    {
+        return minValue;
+    }
+    return value;
+}
 
 /**
  * @brief 将浮点速度转换为菜单使用的 0.1 单位整数。
@@ -150,6 +172,27 @@ void App_VehicleInit(void)
 }
 
 /**
+ * @brief 将蓝牙收到的字节转换为统一命令编号。
+ * @param rawCommand UART2 收到的原始字节。
+ * @note 兼容二进制 1~7 和手机蓝牙助手常见的 ASCII '1'~'7'。
+ * @retval 1~7 为有效命令，0 表示无效命令。
+ */
+uint8_t App_VehicleNormalizeBluetoothCommand(uint8_t rawCommand)
+{
+    if ((rawCommand >= 1U) && (rawCommand <= 7U))
+    {
+        return rawCommand;
+    }
+
+    if ((rawCommand >= (uint8_t)'1') && (rawCommand <= (uint8_t)'7'))
+    {
+        return (uint8_t)(rawCommand - (uint8_t)'0');
+    }
+
+    return 0U;
+}
+
+/**
  * @brief 处理蓝牙运动命令。
  * @param 无。
  * @note 命令 1 前进、2 后退、3 停止、4 右转、5 左转、6 循迹开、7 循迹关。
@@ -157,15 +200,16 @@ void App_VehicleInit(void)
  */
 void App_BluetoothRun(void)
 {
+    uint8_t rawCommand;
     uint8_t command;
     char message[48];
 
-    if (Get_RxFlag() == 0U)
+    if (Bluetooth_ReadByte(&rawCommand) == 0U)
     {
         return;
     }
 
-    command = Get_RxData();
+    command = App_VehicleNormalizeBluetoothCommand(rawCommand);
     g_vehicle_last_bt_command = command;
 
     /* 手动运动命令会关闭循迹；只有命令 6 会把目标速度交给灰度循迹任务。 */
@@ -202,7 +246,8 @@ void App_BluetoothRun(void)
         break;
     }
 
-    (void)snprintf(message, sizeof(message), "BT CMD=%u FOLLOW=%u\r\n",
+    (void)snprintf(message, sizeof(message), "BT RAW=%u CMD=%u FOLLOW=%u\r\n",
+                   (unsigned int)rawCommand,
                    (unsigned int)command,
                    (unsigned int)g_vehicle_follow_enabled);
     uart0_send_string(message);
@@ -220,51 +265,39 @@ void bluetooth_work(void)
 }
 
 /**
- * @brief 根据循迹状态更新左右轮目标速度。
- * @param state 灰度循迹解码出的运动状态。
- * @note 这里只设置 PID 目标速度，不直接输出 PWM，因此不会阻塞调度。
+ * @brief 根据加权循迹偏差更新左右轮目标速度。
+ * @param errorTenths 加权偏差，单位 0.1 路间距；左负右正。
+ * @note 偏差为正表示黑线在右侧，左轮加速、右轮减速，让车向右修正。
  * @retval 无。
  */
-static void App_VehicleApplyLineState(LineTrace_State state)
+static void App_VehicleApplyLineError(int16_t errorTenths)
 {
-    /* 灰度循迹决定“想怎么走”，PID 闭环稍后决定“给多少输出”。 */
-    switch (state)
-    {
-    case LINE_TRACE_FORWARD:
-        App_VehicleSetTarget(standardSpeed, standardSpeed);
-        break;
-    case LINE_TRACE_BACKWARD:
-        App_VehicleSetTarget(-standardSpeed, -standardSpeed);
-        break;
-    case LINE_TRACE_TURN_RIGHT:
-        App_VehicleSetTarget(-standardSpeed * 0.25f, standardSpeed * 0.25f);
-        break;
-    case LINE_TRACE_TURN_LEFT:
-        App_VehicleSetTarget(standardSpeed * 0.25f, -standardSpeed * 0.25f);
-        break;
-    case LINE_TRACE_GO_RIGHT:
-        App_VehicleSetTarget(standardSpeed * 0.67f, standardSpeed);
-        break;
-    case LINE_TRACE_GO_LEFT:
-        App_VehicleSetTarget(standardSpeed, standardSpeed * 0.67f);
-        break;
-    case LINE_TRACE_STOP:
-    default:
-        App_VehicleStop();
-        break;
-    }
+    float correction = (float)errorTenths * APP_VEHICLE_LINE_DIFF_GAIN;
+
+    correction = App_VehicleClampFloat(correction,
+                                       -APP_VEHICLE_LINE_DIFF_MAX,
+                                       APP_VEHICLE_LINE_DIFF_MAX);
+
+    /*
+     * 这里是照片里的“normalize → 外环输出目标”的落地版本：
+     * 灰度加权偏差只生成左右轮目标差速，实际 PWM 仍由后面的速度 PID 闭环计算。
+     */
+    App_VehicleSetTarget(standardSpeed + correction, standardSpeed - correction);
 }
 
 /**
  * @brief 运行灰度循迹采样和目标速度更新任务。
  * @param 无。
- * @note 每 20 ms 读取 74HC165 灰度值；循迹模式关闭时只刷新诊断状态，不接管目标速度。
+ * @note 按 APP_VEHICLE_LINE_PERIOD_MS 读取 74HC165 灰度值；循迹模式关闭时只刷新诊断状态，不接管目标速度。
  * @retval 无。
  */
 void App_LineTraceRun(void)
 {
     const uint32_t now = BSP_Delay_GetTick();
     LineTrace_State state;
+    int16_t errorTenths = 0;
+    uint8_t activeCount = 0U;
+    uint8_t hasLine;
 
     if ((uint32_t)(now - lastLineTick) < APP_VEHICLE_LINE_PERIOD_MS)
     {
@@ -275,19 +308,29 @@ void App_LineTraceRun(void)
     Grayscale_Read();
     g_vehicle_line_raw = Grayscale_GetRaw();
     state = LineTrace_DecodeActiveLowRaw(g_vehicle_line_raw);
+    hasLine = LineTrace_CalcActiveLowWeightedError(g_vehicle_line_raw, &errorTenths, &activeCount);
     g_vehicle_line_state = (uint8_t)state;
+    g_vehicle_line_error_tenths = errorTenths;
+    g_vehicle_line_active_count = activeCount;
 
-    /* 蓝牙命令 6 打开循迹后，灰度状态才会覆盖左右轮目标速度。 */
+    /* 蓝牙命令 6 打开循迹后，加权偏差才会覆盖左右轮目标速度。 */
     if (g_vehicle_follow_enabled != 0U)
     {
-        App_VehicleApplyLineState(state);
+        if (hasLine != 0U)
+        {
+            App_VehicleApplyLineError(errorTenths);
+        }
+        else
+        {
+            App_VehicleStop();
+        }
     }
 }
 
 /**
  * @brief 运行编码器测速和速度 PID 闭环输出。
  * @param 无。
- * @note 10 ms 更新实测速度，40 ms 计算 PID 并写入电机 PWM。
+ * @note 速度采样和 PID 周期由 APP_VEHICLE_SPEED_PERIOD_MS、APP_VEHICLE_CONTROL_PERIOD_MS 配置。
  * @retval 无。
  */
 void App_VehicleControlRun(void)
@@ -332,7 +375,7 @@ static void App_VehicleDebugRun(void)
     lastDebugTick = now;
 
     (void)snprintf(message, sizeof(message),
-                   "VEH raw=0x%02X gs=%u%u%u%u%u%u%u%u state=%s follow=%u tgt=%d act=%d key=%u ks=%lu\r\n",
+                   "VEH raw=0x%02X gs=%u%u%u%u%u%u%u%u state=%s err=%d cnt=%u follow=%u tgt=%d act=%d key=%u ks=%lu\r\n",
                    (unsigned int)g_vehicle_line_raw,
                    (unsigned int)((g_vehicle_line_raw >> 7) & 0x01U),
                    (unsigned int)((g_vehicle_line_raw >> 6) & 0x01U),
@@ -343,6 +386,8 @@ static void App_VehicleDebugRun(void)
                    (unsigned int)((g_vehicle_line_raw >> 1) & 0x01U),
                    (unsigned int)(g_vehicle_line_raw & 0x01U),
                    LineTrace_StateName((LineTrace_State)g_vehicle_line_state),
+                   (int)g_vehicle_line_error_tenths,
+                   (unsigned int)g_vehicle_line_active_count,
                    (unsigned int)g_vehicle_follow_enabled,
                    (int)App_VehicleSpeedToTenths((leftSpeedPid.Target + rightSpeedPid.Target) * 0.5f),
                    (int)App_VehicleSpeedToTenths((Motor1_Speed + Motor2_Speed) * 0.5f),

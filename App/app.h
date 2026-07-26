@@ -87,6 +87,14 @@ void App_LineTraceRun(void);
 void App_VehicleControlRun(void);
 
 /**
+ * @brief 将蓝牙接收到的字节归一化为车辆命令编号。
+ * @param rawCommand UART2 收到的原始字节，可为数值 1~7 或 ASCII 字符 '1'~'7'。
+ * @note 返回 0 表示不是有效车辆命令。
+ * @retval 1~7 为有效命令，0 为无效命令。
+ */
+uint8_t App_VehicleNormalizeBluetoothCommand(uint8_t rawCommand);
+
+/**
  * @brief 执行菜单选择的 Task 1 逻辑。
  * @param 无。
  * @note 用户任务接口，保持非阻塞；在菜单选择 Task 1 后由 App_TasksRun() 周期调用。

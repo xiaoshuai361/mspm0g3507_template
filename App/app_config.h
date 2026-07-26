@@ -28,6 +28,9 @@
 #define APP_VEHICLE_CONTROL_PERIOD_MS (20U) /**< 速度 PID 控制周期，单位 ms；50Hz 控制兼顾响应和负载。 */
 #define APP_VEHICLE_DEBUG_PERIOD_MS (1000U) /**< 车辆状态串口调试输出周期，单位 ms。 */
 
+#define APP_VEHICLE_LINE_DIFF_GAIN (1.20f) /**< 循迹加权偏差到左右轮差速修正的比例。 */
+#define APP_VEHICLE_LINE_DIFF_MAX (45.0f)  /**< 循迹单侧最大差速修正，避免急转时目标速度过大。 */
+
 #define APP_VEHICLE_PID_OUT_MAX (1800.0f)  /**< 速度 PID 输出上限。 */
 #define APP_VEHICLE_PID_OUT_MIN (-1800.0f) /**< 速度 PID 输出下限。 */
 #define APP_VEHICLE_PID_ERR_MAX (120.0f)   /**< 速度 PID 误差限幅。 */

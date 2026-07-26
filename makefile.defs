@@ -51,6 +51,12 @@ LINE_TRACE_EXTRA_DEPS := \
 ./Module/LineTrace/line_trace.d \
 ./tests/line_trace_test.d
 
+BT_COMMAND_EXTRA_OBJS := \
+./tests/bluetooth_command_test.o
+
+BT_COMMAND_EXTRA_DEPS := \
+./tests/bluetooth_command_test.d
+
 ifeq ($(findstring Module/ToF/dl1b.o,$(ORDERED_OBJS)),)
 OBJS += $(DL1B_EXTRA_OBJS)
 C_DEPS += $(DL1B_EXTRA_DEPS)
@@ -84,4 +90,11 @@ OBJS += $(LINE_TRACE_EXTRA_OBJS)
 C_DEPS += $(LINE_TRACE_EXTRA_DEPS)
 ORDERED_OBJS += \
 $(LINE_TRACE_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring tests/bluetooth_command_test.o,$(ORDERED_OBJS)),)
+OBJS += $(BT_COMMAND_EXTRA_OBJS)
+C_DEPS += $(BT_COMMAND_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(BT_COMMAND_EXTRA_OBJS)
 endif

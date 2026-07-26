@@ -11,7 +11,6 @@
     "C_Cpp.default.cStandard":  "c11",
     "C_Cpp.default.compilerPath":  "D:/APPs/TI/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.4.LTS/bin/tiarmclang.exe",
     "C_Cpp.default.intelliSenseMode":  "windows-clang-arm",
-    "C_Cpp.default.compileCommands":  "${workspaceFolder}/Debug/.clangd/compile_commands.json",
     "C_Cpp.default.defines":  [
                                   "__MSPM0G3507__",
                                   "__USE_SYSCONFIG__"

@@ -13,6 +13,46 @@ static uint32_t LineTrace_ExpectActiveLowState(uint8_t raw,
     return (LineTrace_DecodeActiveLowRaw(raw) == expected) ? 0U : 1U;
 }
 
+static uint32_t LineTrace_ExpectWeightedError(uint8_t raw,
+                                              int16_t expectedError,
+                                              uint8_t expectedCount)
+{
+    int16_t error = 0;
+    uint8_t count = 0U;
+
+    if (LineTrace_CalcWeightedError(raw, &error, &count) == 0U) {
+        return 1U;
+    }
+
+    return ((error == expectedError) && (count == expectedCount)) ? 0U : 1U;
+}
+
+static uint32_t LineTrace_ExpectActiveLowWeightedError(uint8_t raw,
+                                                       int16_t expectedError,
+                                                       uint8_t expectedCount)
+{
+    int16_t error = 0;
+    uint8_t count = 0U;
+
+    if (LineTrace_CalcActiveLowWeightedError(raw, &error, &count) == 0U) {
+        return 1U;
+    }
+
+    return ((error == expectedError) && (count == expectedCount)) ? 0U : 1U;
+}
+
+static uint32_t LineTrace_ExpectLostLine(uint8_t raw)
+{
+    int16_t error = 123;
+    uint8_t count = 99U;
+
+    if (LineTrace_CalcWeightedError(raw, &error, &count) != 0U) {
+        return 1U;
+    }
+
+    return ((error == 0) && (count == 0U)) ? 0U : 1U;
+}
+
 uint32_t LineTrace_RunSelfTest(void)
 {
     uint32_t failures = 0U;
@@ -40,6 +80,20 @@ uint32_t LineTrace_RunSelfTest(void)
     failures += LineTrace_ExpectActiveLowState(0xE6U, LINE_TRACE_FORWARD);
     failures += LineTrace_ExpectActiveLowState(0x7FU, LINE_TRACE_TURN_LEFT);
     failures += LineTrace_ExpectActiveLowState(0xFEU, LINE_TRACE_TURN_RIGHT);
+
+    /*
+     * 加权连续偏差：D8(bit7) 为最左，D1(bit0) 为最右。
+     * 位置权重为 -35, -25, -15, -5, +5, +15, +25, +35。
+     */
+    failures += LineTrace_ExpectLostLine(0x00U);
+    failures += LineTrace_ExpectWeightedError(0x18U, 0, 2U);
+    failures += LineTrace_ExpectWeightedError(0x08U, 5, 1U);
+    failures += LineTrace_ExpectWeightedError(0x10U, -5, 1U);
+    failures += LineTrace_ExpectWeightedError(0x03U, 30, 2U);
+    failures += LineTrace_ExpectWeightedError(0xC0U, -30, 2U);
+    failures += LineTrace_ExpectActiveLowWeightedError(0xE7U, 0, 2U);
+    failures += LineTrace_ExpectActiveLowWeightedError(0xFCU, 30, 2U);
+    failures += LineTrace_ExpectActiveLowWeightedError(0x3FU, -30, 2U);
 
     return failures;
 }

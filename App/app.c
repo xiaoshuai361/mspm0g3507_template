@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "bsp_adc.h"
+#include "bluetooth_command_test.h"
 #include "delay.h"
 #include "dl1a_test.h"
 #include "key5d_test.h"
@@ -21,6 +22,8 @@ volatile uint32_t g_dl1a_self_test_failures; /**< DL1A 测距模块自检失败�
 volatile uint32_t g_dl1a_self_test_complete; /**< DL1A 测距模块自检已执行标志。 */
 volatile uint32_t g_line_trace_self_test_failures; /**< 灰度循迹解码自检失败项数量。 */
 volatile uint32_t g_line_trace_self_test_complete; /**< 灰度循迹解码自检已执行标志。 */
+volatile uint32_t g_bt_command_self_test_failures; /**< 蓝牙车辆命令解析自检失败项数量。 */
+volatile uint32_t g_bt_command_self_test_complete; /**< 蓝牙车辆命令解析自检已执行标志。 */
 
 static uint32_t lastBatteryTick; /**< 上一次电池电压采样时间戳。 */
 
@@ -36,11 +39,12 @@ static void App_LogSelfTests(void)
 
     /* 汇总各模块自检结果，方便模板工程上电后直接从 UART0 判断状态。 */
     (void)snprintf(message, sizeof(message),
-                   "Self-test Key5D=%lu Menu=%lu DL1A=%lu Line=%lu\r\n",
+                   "Self-test Key5D=%lu Menu=%lu DL1A=%lu Line=%lu BT=%lu\r\n",
                    (unsigned long)g_key5d_self_test_failures,
                    (unsigned long)g_menu_self_test_failures,
                    (unsigned long)g_dl1a_self_test_failures,
-                   (unsigned long)g_line_trace_self_test_failures);
+                   (unsigned long)g_line_trace_self_test_failures,
+                   (unsigned long)g_bt_command_self_test_failures);
     uart0_send_string(message);
 }
 
@@ -161,6 +165,8 @@ void App_Init(void)
     g_dl1a_self_test_complete = 1U;
     g_line_trace_self_test_failures = LineTrace_RunSelfTest();
     g_line_trace_self_test_complete = 1U;
+    g_bt_command_self_test_failures = BluetoothCommand_RunSelfTest();
+    g_bt_command_self_test_complete = 1U;
 
     uart0_init();
     uart0_send_string("BOOT uart0 OK\r\n");

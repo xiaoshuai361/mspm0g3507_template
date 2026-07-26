@@ -24,7 +24,6 @@
                                "forcedInclude":  [
 
                                                  ],
-                               "compileCommands":  "${workspaceFolder}/Debug/.clangd/compile_commands.json",
                                "browse":  {
                                               "path":  [
                                                            "${workspaceFolder}",
