@@ -1,5 +1,37 @@
 # MSPM0G3507 自制板模板工程
 
+## 多人协作先看：`.vscode` 不上传
+
+本仓库已经在 `.gitignore` 中忽略整个 `.vscode/`：
+
+```gitignore
+.vscode/
+```
+
+所以以后每个人自己的 `.vscode` 不会被上传，也不会因为普通修改被 Git 管。
+
+注意一个 Git 机制问题：
+
+这次因为 `.vscode` 之前已经上传过，所以别人第一次 `git pull` 到移除 `.vscode` 的提交时，Git 可能会删除之前被仓库跟踪的 `.vscode` 文件。这个无法完全避免，因为 Git 要同步“仓库里删除了这些文件”的状态。
+
+但之后 Git 就不会再管 `.vscode` 了。
+
+如果队友已经 clone 过，稳妥操作是：
+
+```powershell
+Copy-Item .vscode .vscode_backup -Recurse
+git pull
+.\setup.ps1
+```
+
+如果 `.vscode` 已经被删了，直接运行：
+
+```powershell
+.\setup.ps1
+```
+
+脚本会按自己的电脑路径重新生成 `.vscode`。以后再 `git pull`，本机 `.vscode` 就不会再被远端影响。
+
 面向 TI MSPM0G3507 LQFP-64 自制板的 CCS 模板工程。工程按 `BSP → Module → App` 三层组织，适合作为电赛小车、传感器测试板和课程项目的起始模板。
 
 > 配置源：`empty.syscfg`  
