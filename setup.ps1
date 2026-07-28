@@ -805,7 +805,7 @@ function Write-VscodeFiles {
     Write-JsonFile -Path $LocalEnvPath -Object $localEnv
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
-    $ignoreLine = ".vscode/local.env.json"
+    $ignoreLine = ".vscode/"
     if (Test-Path -LiteralPath $gitignore -PathType Leaf) {
         $content = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
         if ($content -notcontains $ignoreLine) {

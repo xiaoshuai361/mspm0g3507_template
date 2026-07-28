@@ -27,4 +27,3 @@ installers/
 # OS/editor noise
 .DS_Store
 Thumbs.db
-.vscode/local.env.json
