@@ -3,6 +3,10 @@
 # CCS-generated Debug/makefile includes this file; do not edit Debug/*.mk.
 ################################################################################
 
+# Applies to existing generated recipes; .cproject carries the same path for
+# the next CCS makefile regeneration.
+GEN_OPTS__FLAG += -I"../Module/LineTrace"
+
 DL1B_EXTRA_OBJS := \
 ./BSP/DL1B/bsp_dl1b.o \
 ./Module/ToF/dl1b.o \

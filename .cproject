@@ -51,6 +51,7 @@
                                     <listOptionValue value="${PROJECT_ROOT}/Module/Grayscale"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Module/IMU"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Module/Key5D"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/Module/LineTrace"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Module/Menu"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Module/Keys"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Module/Motor"/>

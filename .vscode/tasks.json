@@ -14,7 +14,7 @@
                                    "-WorkspaceFolder",
                                    "${workspaceFolder}",
                                    "-Gmake",
-                                   "D:/APPs/TI/CCS/ccs/utils/bin/gmake.exe",
+                                   "D:/ti/CCS/ccs/utils/bin/gmake.exe",
                                    "-Jobs",
                                    "4"
                                ],
@@ -42,7 +42,7 @@
                   {
                       "label":  "Clean: CCS Debug",
                       "type":  "process",
-                      "command":  "D:/APPs/TI/CCS/ccs/utils/bin/gmake.exe",
+                      "command":  "D:/ti/CCS/ccs/utils/bin/gmake.exe",
                       "args":  [
                                    "-C",
                                    "${workspaceFolder}/Debug",
@@ -105,9 +105,9 @@
                                    "-WorkspaceFolder",
                                    "${workspaceFolder}",
                                    "-SdkProduct",
-                                   "D:/APPs/TI/CCS/mspm0_sdk_2_07_00_05/.metadata/product.json",
+                                   "D:/ti/mspm0_sdk_2_08_00_03/.metadata/product.json",
                                    "-SysConfigRoot",
-                                   "D:/APPs/TI/sysconfig_1.27.1"
+                                   "D:/ti/sysconfig"
                                ],
                       "group":  "build",
                       "problemMatcher":  [
@@ -136,8 +136,8 @@
                                    "/c",
                                    "${workspaceFolder}/.vscode/scripts/sysconfig-generate.cmd",
                                    "${workspaceFolder}",
-                                   "D:/APPs/TI/sysconfig_1.27.1/sysconfig_cli.bat",
-                                   "D:/APPs/TI/CCS/mspm0_sdk_2_07_00_05/.metadata/product.json",
+                                   "D:/ti/sysconfig/sysconfig_cli.bat",
+                                   "D:/ti/mspm0_sdk_2_08_00_03/.metadata/product.json",
                                    "${workspaceFolder}/Debug/syscfg"
                                ],
                       "group":  "build",
@@ -167,7 +167,7 @@
                                    "/c",
                                    "${workspaceFolder}/.vscode/scripts/flash-dslite-jlink.cmd",
                                    "${workspaceFolder}",
-                                   "D:/APPs/TI/Unflsh/dslite.bat"
+                                   "D:/ti/UNIFLASH/dslite.bat"
                                ],
                       "dependsOn":  "Build: CCS Debug",
                       "dependsOrder":  "sequence",
@@ -198,8 +198,8 @@
                                    "/c",
                                    "${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd",
                                    "${workspaceFolder}",
-                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
-                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts",
+                                   "openocd.exe",
+                                   "",
                                    "40000"
                                ],
                       "dependsOn":  "Build: CCS Debug",
@@ -224,8 +224,8 @@
                                    "/c",
                                    "${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd",
                                    "${workspaceFolder}",
-                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/bin/openocd.exe",
-                                   "F:/APPS/openocd/xpack-openocd-0.12.0-7/openocd/scripts",
+                                   "openocd.exe",
+                                   "",
                                    "8000"
                                ],
                       "dependsOn":  "Build: CCS Debug",

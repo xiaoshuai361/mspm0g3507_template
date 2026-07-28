@@ -34,6 +34,7 @@ $candidateRoots = @(
     "D:\APPs\TI\sysconfig_1.27.1",
     "D:\APPs\TI\CCS\ccs\utils\sysconfig_1.27.0",
     "D:\APPs\TI\CCS\ccs\utils\sysconfig_1.25.0",
+    "D:\ti\sysconfig",
     "C:\ti\sysconfig_1.27.1",
     "C:\ti\sysconfig_1.27.0",
     "D:\ti\sysconfig_1.27.1",
