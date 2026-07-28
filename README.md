@@ -64,7 +64,7 @@ empty.c → App → Module → BSP → DriverLib/SysConfig
 .\setup.ps1
 ```
 
-该脚本会检查 CCS、MSPM0 SDK、SysConfig、J-Link/OpenOCD 等路径，并生成本机 `.vscode` 相关配置。`.vscode/local.env.json` 属于本机配置，默认不会提交。
+该脚本会检查 CCS、MSPM0 SDK、SysConfig、J-Link/OpenOCD 等路径，并生成本机 `.vscode` 相关配置。由于每个人的安装路径不同，`.vscode/` 整个目录都作为本机私有配置处理，默认不会提交。
 
 ### 2. 导入 CCS
 
@@ -217,7 +217,7 @@ third_party/seekfree/zf_device_config.lib
 Debug/
 Release/
 .headroom-cache/
-.vscode/local.env.json
+.vscode/
 *.out
 *.o
 *.map
@@ -251,3 +251,13 @@ Release/
 ```
 
 然后检查 `.vscode/local.env.json` 和 `.vscode/c_cpp_properties.json` 中的 CCS、SDK、编译器路径是否匹配本机。
+
+### 多人开发时 `.vscode` 怎么处理？
+
+`.vscode/` 整个目录不提交。仓库里的共享 VS Code 辅助脚本放在 `tools/vscode/`，带有绝对路径的 VS Code 配置由每个人自己生成。clone 后运行：
+
+```powershell
+.\setup.ps1
+```
+
+脚本会按自己的电脑环境重新生成 `.vscode/settings.json`、`.vscode/tasks.json`、`.vscode/launch.json`、`.vscode/c_cpp_properties.json` 和 `.vscode/extensions.json`。

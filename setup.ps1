@@ -12,7 +12,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VscodeDir = Join-Path $ProjectRoot ".vscode"
-$ScriptsDir = Join-Path $VscodeDir "scripts"
+$ScriptsDir = Join-Path $ProjectRoot "tools\vscode"
 $LocalEnvPath = Join-Path $VscodeDir "local.env.json"
 $InstallersDir = Join-Path $ProjectRoot "installers"
 
@@ -612,7 +612,7 @@ function New-TasksJson {
                 "label" = "Build: CCS Debug"
                 "type" = "process"
                 "command" = "powershell.exe"
-                "args" = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", '${workspaceFolder}/.vscode/scripts/build-ccs-debug.ps1', "-WorkspaceFolder", '${workspaceFolder}', "-Gmake", $gmake, "-Jobs", "4")
+                "args" = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", '${workspaceFolder}/tools/vscode/build-ccs-debug.ps1', "-WorkspaceFolder", '${workspaceFolder}', "-Gmake", $gmake, "-Jobs", "4")
                 "group" = [ordered]@{ "kind" = "build"; "isDefault" = $true }
                 "problemMatcher" = @('$gcc')
                 "options" = [ordered]@{ "statusbar" = (StatusBar '$(tools) Build' "Build CCS Debug project" "#8FD694") }
@@ -642,7 +642,7 @@ function New-TasksJson {
                 "label" = "Open SysConfig"
                 "type" = "process"
                 "command" = "powershell.exe"
-                "args" = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", '${workspaceFolder}/.vscode/scripts/open-sysconfig.ps1', "-WorkspaceFolder", '${workspaceFolder}', "-SdkProduct", $sdkProduct, "-SysConfigRoot", $sysconfigGuiRoot)
+                "args" = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", '${workspaceFolder}/tools/vscode/open-sysconfig.ps1', "-WorkspaceFolder", '${workspaceFolder}', "-SdkProduct", $sdkProduct, "-SysConfigRoot", $sysconfigGuiRoot)
                 "group" = "build"
                 "problemMatcher" = @()
                 "options" = [ordered]@{ "statusbar" = (StatusBar '$(settings-gear) SysConfig' "Open empty.syscfg GUI" "#7FDBCA") }
@@ -652,7 +652,7 @@ function New-TasksJson {
                 "label" = "SysConfig: Generate"
                 "type" = "process"
                 "command" = "cmd.exe"
-                "args" = @("/d", "/c", '${workspaceFolder}/.vscode/scripts/sysconfig-generate.cmd', '${workspaceFolder}', $sysconfigCli, $sdkProduct, '${workspaceFolder}/Debug/syscfg')
+                "args" = @("/d", "/c", '${workspaceFolder}/tools/vscode/sysconfig-generate.cmd', '${workspaceFolder}', $sysconfigCli, $sdkProduct, '${workspaceFolder}/Debug/syscfg')
                 "group" = "build"
                 "problemMatcher" = @()
                 "options" = [ordered]@{ "statusbar" = (StatusBar '$(file-code) Gen' "Generate Debug/syscfg files" "#B2CCD6") }
@@ -662,7 +662,7 @@ function New-TasksJson {
                 "label" = "Flash: J-Link DSLite (Recommended)"
                 "type" = "process"
                 "command" = "cmd.exe"
-                "args" = @("/d", "/c", '${workspaceFolder}/.vscode/scripts/flash-dslite-jlink.cmd', '${workspaceFolder}', $dslite)
+                "args" = @("/d", "/c", '${workspaceFolder}/tools/vscode/flash-dslite-jlink.cmd', '${workspaceFolder}', $dslite)
                 "dependsOn" = "Build: CCS Debug"
                 "dependsOrder" = "sequence"
                 "group" = "test"
@@ -674,7 +674,7 @@ function New-TasksJson {
                 "label" = "Flash: J-Link OpenOCD"
                 "type" = "process"
                 "command" = "cmd.exe"
-                "args" = @("/d", "/c", '${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd', '${workspaceFolder}', $openocd, $openocdScripts, "40000")
+                "args" = @("/d", "/c", '${workspaceFolder}/tools/vscode/flash-openocd-jlink.cmd', '${workspaceFolder}', $openocd, $openocdScripts, "40000")
                 "dependsOn" = "Build: CCS Debug"
                 "dependsOrder" = "sequence"
                 "group" = "test"
@@ -686,7 +686,7 @@ function New-TasksJson {
                 "label" = "Flash: J-Link OpenOCD Safe"
                 "type" = "process"
                 "command" = "cmd.exe"
-                "args" = @("/d", "/c", '${workspaceFolder}/.vscode/scripts/flash-openocd-jlink.cmd', '${workspaceFolder}', $openocd, $openocdScripts, "8000")
+                "args" = @("/d", "/c", '${workspaceFolder}/tools/vscode/flash-openocd-jlink.cmd', '${workspaceFolder}', $openocd, $openocdScripts, "8000")
                 "dependsOn" = "Build: CCS Debug"
                 "dependsOrder" = "sequence"
                 "group" = "test"

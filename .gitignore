@@ -1,5 +1,5 @@
 # Local machine configuration
-.vscode/local.env.json
+.vscode/
 
 # CCS / SysConfig generated build outputs
 Debug/
@@ -27,3 +27,4 @@ installers/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+.vscode/local.env.json
