@@ -6,7 +6,8 @@ int main(void)
     SYSCFG_DL_init();
     App_Init();
 
-    while (1) {
+    while (1)
+    {
         App_Run();
     }
 }
