@@ -120,9 +120,11 @@ function Ask-YesNo {
     while ($true) {
         $answer = Read-Host ($Question + $suffix)
         if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
-        switch -Regex ($answer.Trim()) {
-            '^(y|yes|Y|YES|是|好)$' { return $true }
-            '^(n|no|N|NO|否|不)$' { return $false }
+        switch ($answer.Trim().ToLowerInvariant()) {
+            "y" { return $true }
+            "yes" { return $true }
+            "n" { return $false }
+            "no" { return $false }
             default { Write-Host "Please answer y or n." }
         }
     }
@@ -728,7 +730,7 @@ function New-LaunchJson {
                 "liveWatch" = [ordered]@{ "enabled" = $false; "samplesPerSecond" = 4 }
             },
             [ordered]@{
-                "name" = "Debug: DAPLink OpenOCD (备用)"
+                "name" = "Debug: DAPLink OpenOCD (fallback)"
                 "type" = "cortex-debug"
                 "request" = "launch"
                 "servertype" = "openocd"
