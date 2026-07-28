@@ -12,6 +12,8 @@
 #define APP_KEY_TEST_SERIAL_PERIOD_MS (200U)      /**< 五向按键测试串口输出周期，单位 ms。 */
 #define APP_MENU_DYNAMIC_DISPLAY_PERIOD_MS (200U) /**< 菜单动态页面刷新周期，单位 ms；降低 OLED 占用。 */
 
+#define APP_ELECTROMAGNET_KEY_PERIOD_MS (10U) /**< PA28 独立按键扫描周期，单位 ms。 */
+
 #define APP_BATTERY_SAMPLE_PERIOD_MS (5000U) /**< 电池电压采样周期，单位 ms；电池变化慢，5s 更新一次即可。 */
 #define APP_BATTERY_LOW_MV (10800U)          /**< 3S 18650 低电量提醒阈值，单位 mV；约 3.6V/节。 */
 

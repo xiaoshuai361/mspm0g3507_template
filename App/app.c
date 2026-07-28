@@ -30,7 +30,7 @@ static uint32_t lastBatteryTick; /**< 上一次电池电压采样时间戳。 */
 /**
  * @brief 输出上电软件自检结果。
  * @param 无。
- * @note 用于确认 Key5D、Menu、DL1A 和循迹解码逻辑是否异常。
+ * @note 用于确认 Key5D、Menu、DL1A、循迹和蓝牙命令解析逻辑是否异常。
  * @retval 无。
  */
 static void App_LogSelfTests(void)
@@ -167,6 +167,7 @@ void App_Init(void)
     g_line_trace_self_test_complete = 1U;
     g_bt_command_self_test_failures = BluetoothCommand_RunSelfTest();
     g_bt_command_self_test_complete = 1U;
+    App_ElectromagnetInit();
 
     uart0_init();
     uart0_send_string("BOOT uart0 OK\r\n");
@@ -195,6 +196,7 @@ void App_Run(void)
     /* OLED 显示任务：按键测试页和正式菜单二选一，避免两个页面抢屏。 */
     // App_Key5DTestRun();
     App_BatteryRun();
+    App_ElectromagnetRun();
     App_MenuRun();
 
     /* 可选模块：这些任务都是非阻塞轮询，启停只需要保留或注释对应调用。 */
