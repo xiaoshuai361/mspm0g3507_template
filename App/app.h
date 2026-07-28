@@ -5,6 +5,9 @@
 #include <stdint.h>
 
 extern volatile uint8_t g_active_task; /**< 当前菜单选择的任务编号。 */
+extern volatile uint8_t g_electromagnet_enabled; /**< 电磁铁输出状态，1 表示 PA26 高电平打开。 */
+extern volatile uint32_t g_electromagnet_toggle_count; /**< PA28 按键触发切换次数。 */
+extern volatile uint8_t g_electromagnet_button_raw; /**< PA28 独立按键原始按下状态。 */
 
 /**
  * @brief 初始化 App 层公共资源和可选模块状态。
@@ -37,6 +40,44 @@ void App_Key5DTestRun(void);
  * @retval 无。
  */
 void App_MenuRun(void);
+
+/**
+ * @brief 初始化电磁铁 PA26 输出和 PA28 按键状态机。
+ * @param 无。
+ * @note 初始默认关闭电磁铁，PA26 输出低电平。
+ * @retval 无。
+ */
+void App_ElectromagnetInit(void);
+
+/**
+ * @brief 周期扫描 PA28 独立按键并控制 PA26 电磁铁 MOS。
+ * @param 无。
+ * @note 每次稳定按下 PA28 会切换一次电磁铁开关状态。
+ * @retval 无。
+ */
+void App_ElectromagnetRun(void);
+
+/**
+ * @brief 直接设置电磁铁开关状态。
+ * @param enabled true 打开，false 关闭。
+ * @note 打开时 PA26 输出高电平，关闭时 PA26 输出低电平。
+ * @retval 无。
+ */
+void App_ElectromagnetSetEnabled(bool enabled);
+
+/**
+ * @brief 翻转电磁铁开关状态。
+ * @param 无。
+ * @retval 无。
+ */
+void App_ElectromagnetToggle(void);
+
+/**
+ * @brief 读取电磁铁当前状态。
+ * @param 无。
+ * @retval true 表示打开，false 表示关闭。
+ */
+bool App_ElectromagnetIsEnabled(void);
 
 /**
  * @brief 运行 IMU 初始化、采样和菜单数据更新任务。

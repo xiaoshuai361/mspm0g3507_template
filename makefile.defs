@@ -41,6 +41,12 @@ APP_EXTRA_DEPS := \
 ./App/app_imu.d \
 ./App/app_tof.d
 
+APP_ELECTROMAGNET_EXTRA_OBJS := \
+./App/app_electromagnet.o
+
+APP_ELECTROMAGNET_EXTRA_DEPS := \
+./App/app_electromagnet.d
+
 VEHICLE_EXTRA_OBJS := \
 ./App/app_vehicle.o
 
@@ -80,6 +86,13 @@ OBJS += $(APP_EXTRA_OBJS)
 C_DEPS += $(APP_EXTRA_DEPS)
 ORDERED_OBJS += \
 $(APP_EXTRA_OBJS)
+endif
+
+ifeq ($(findstring App/app_electromagnet.o,$(ORDERED_OBJS)),)
+OBJS += $(APP_ELECTROMAGNET_EXTRA_OBJS)
+C_DEPS += $(APP_ELECTROMAGNET_EXTRA_DEPS)
+ORDERED_OBJS += \
+$(APP_ELECTROMAGNET_EXTRA_OBJS)
 endif
 
 ifeq ($(findstring App/app_vehicle.o,$(ORDERED_OBJS)),)
