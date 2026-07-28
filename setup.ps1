@@ -121,8 +121,8 @@ function Ask-YesNo {
         $answer = Read-Host ($Question + $suffix)
         if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
         switch -Regex ($answer.Trim()) {
-            '^(?i:y|yes)$' { return $true }
-            '^(?i:n|no)$' { return $false }
+            '^(y|yes|Y|YES|是|好)$' { return $true }
+            '^(n|no|N|NO|否|不)$' { return $false }
             default { Write-Host "Please answer y or n." }
         }
     }
@@ -289,31 +289,6 @@ function Install-JLinkIfRequested {
         return $false
     }
 
-    $uninstallRoots = @(
-        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-    $jlinkPackage = Get-ItemProperty -Path $uninstallRoots -ErrorAction SilentlyContinue |
-        Where-Object {
-            $displayNameProperty = $_.PSObject.Properties["DisplayName"]
-            $installLocationProperty = $_.PSObject.Properties["InstallLocation"]
-            if (-not $displayNameProperty -or -not $installLocationProperty) {
-                return $false
-            }
-
-            $displayName = [string]$displayNameProperty.Value
-            $installLocation = [string]$installLocationProperty.Value
-            $displayName -match '^(SEGGER\s+)?J-Link\b' -and
-            -not [string]::IsNullOrWhiteSpace($installLocation) -and
-            (Test-Path -LiteralPath $installLocation -PathType Container)
-        } |
-        Select-Object -First 1
-    if ($jlinkPackage) {
-        Write-Ok "J-Link software detected: $($jlinkPackage.InstallLocation)"
-        return $false
-    }
-
     if (-not (Ask-YesNo "J-Link driver/device was not detected. Open/install SEGGER J-Link software now?")) {
         return $false
     }
@@ -393,7 +368,6 @@ function Find-Tools {
         "D:\APPs\TI\sysconfig_1.27.1",
         "D:\APPs\TI\sysconfig_*",
         "D:\APPs\TI\CCS\ccs\utils\sysconfig_*",
-        "D:\ti\sysconfig",
         "D:\ti\sysconfig_*",
         "C:\ti\sysconfig_*"
     )
@@ -510,7 +484,7 @@ function Install-VscodeExtensions {
             Write-Ok "VSCode extension installed: $ext"
         } else {
             Write-Warn "VSCode extension missing: $ext"
-            if ($InstallMissing -and -not $NoWrite) {
+            if ($InstallMissing) {
                 Write-Host "[proc] code --install-extension $ext --force"
                 & $CodeCommand --install-extension $ext --force
                 if ($LASTEXITCODE -ne 0) {
@@ -754,7 +728,7 @@ function New-LaunchJson {
                 "liveWatch" = [ordered]@{ "enabled" = $false; "samplesPerSecond" = 4 }
             },
             [ordered]@{
-                "name" = "Debug: DAPLink OpenOCD (Fallback)"
+                "name" = "Debug: DAPLink OpenOCD (备用)"
                 "type" = "cortex-debug"
                 "request" = "launch"
                 "servertype" = "openocd"
@@ -831,12 +805,6 @@ function Invoke-BuildVerify {
         return
     }
 
-    $debugDir = Join-Path $ProjectRoot "Debug"
-    if (-not (Test-Path -LiteralPath $debugDir -PathType Container)) {
-        Write-Warn "Build verify skipped: Debug build directory not found. Build the project once in CCS to generate it."
-        return
-    }
-
     $buildScript = Join-Path $ScriptsDir "build-ccs-debug.ps1"
     if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
         Write-Warn "Build verify skipped: $buildScript not found."
@@ -868,12 +836,7 @@ Show-Tool "OpenOCD scripts" $tools.openocdScripts -Optional
 Show-Tool "Arm GDB" $tools.gdb -Optional
 
 Write-Step "Install missing large software"
-$installedLargeSoftware = $false
-if ($NoWrite) {
-    Write-Warn "Software installation skipped by -NoWrite."
-} else {
-    $installedLargeSoftware = Offer-MissingSoftwareInstall -Tools $tools
-}
+$installedLargeSoftware = Offer-MissingSoftwareInstall -Tools $tools
 if ($installedLargeSoftware) {
     Write-Host "[main] Re-detect tools after installer step..."
     $tools = Find-Tools
@@ -903,8 +866,8 @@ if ($NoWrite) {
 }
 
 Write-Step "Verify build"
-if ($NoBuildVerify -or $NoWrite) {
-    Write-Warn "Build verify skipped by -NoBuildVerify or -NoWrite."
+if ($NoBuildVerify) {
+    Write-Warn "Build verify skipped by -NoBuildVerify."
 } else {
     Invoke-BuildVerify -Tools $tools
 }

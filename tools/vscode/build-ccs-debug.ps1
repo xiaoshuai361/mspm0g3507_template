@@ -71,18 +71,6 @@ function Show-MemoryUsage {
 }
 
 $projectName = Split-Path -Leaf $WorkspaceFolder
-$ccsProjectFile = Join-Path $WorkspaceFolder ".project"
-if (Test-Path -LiteralPath $ccsProjectFile -PathType Leaf) {
-    try {
-        [xml]$ccsProject = Get-Content -Raw -LiteralPath $ccsProjectFile
-        $configuredProjectName = [string]$ccsProject.projectDescription.name
-        if (-not [string]::IsNullOrWhiteSpace($configuredProjectName)) {
-            $projectName = $configuredProjectName.Trim()
-        }
-    } catch {
-        Write-Host "[build] Could not read CCS project name from .project; using workspace folder name."
-    }
-}
 $debugDir = Join-Path $WorkspaceFolder "Debug"
 $program = Join-Path $debugDir "$projectName.out"
 $mapFile = Join-Path $debugDir "$projectName.map"
