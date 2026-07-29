@@ -258,27 +258,70 @@ void Motor2_Get_Speed(void){
 }
 
 float Motor1_Lucheng,Motor2_Lucheng;
-float Measure_Distance = 0; /**< Measure_Distance 全局状态或配置变量。 */
+float Measure_Distance = 0;
 
-//测量所有电机速度
-/**
- * @brief 根据编码器计数计算左右轮速度。
- * @param 无。
- * @note 根据当前工程三层结构封装，供上层模块调用。
- * @retval 无。
- */
-void MEASURE_MOTORS_SPEED(void){
-	Motor1_Get_Speed();Motor2_Get_Speed();
-	
-	Motor1_Lucheng += Motor1_Speed*SAMPLE_TIME;//路程累计
-	Motor2_Lucheng += Motor2_Speed*SAMPLE_TIME;//路程累计
-	Measure_Distance = Motor1_Lucheng/2.0 +Motor2_Lucheng/2.0;
-	
-	if(Measure_Distance>10000)
-	{
-		Measure_Distance = 0;
-		Motor1_Lucheng = 0;
-		Motor2_Lucheng = 0;
-		
-	}
+/* 加速度计算：速度滤波 + 环形缓冲 + 差分 */
+float Motor1_SpeedFlt;   /**< 左轮低通滤波速度(cm/s)。 */
+float Motor2_SpeedFlt;   /**< 右轮低通滤波速度(cm/s)。 */
+float Motor1_Accel;      /**< 左轮加速度(cm/s²)。 */
+float Motor2_Accel;      /**< 右轮加速度(cm/s²)。 */
+
+#define ACCEL_BUF_SIZE  (8U)
+#define ACCEL_WINDOW_S  ((float)ACCEL_BUF_SIZE * SAMPLE_TIME)  /* 0.16s */
+
+static float  accelBufL[ACCEL_BUF_SIZE];  /* 左轮速度环形缓冲 */
+static float  accelBufR[ACCEL_BUF_SIZE];  /* 右轮速度环形缓冲 */
+static uint8_t accelIdx;                  /* 环形缓冲写入位置 */
+static uint8_t accelFull;                 /* 缓冲是否已填满一轮 */
+
+#define SPEED_FLT_ALPHA  (0.15f)           /* 速度低通：0.85*旧 + 0.15*新 */
+#define ACCEL_FLT_ALPHA  (0.10f)           /* 加速度低通：0.9*旧 + 0.1*新 */
+
+void MEASURE_MOTORS_SPEED(void)
+{
+    Motor1_Get_Speed();
+    Motor2_Get_Speed();
+
+    Motor1_Lucheng += Motor1_Speed * SAMPLE_TIME;
+    Motor2_Lucheng += Motor2_Speed * SAMPLE_TIME;
+    Measure_Distance = Motor1_Lucheng / 2.0f + Motor2_Lucheng / 2.0f;
+
+    if (Measure_Distance > 10000.0f)
+    {
+        Measure_Distance = 0.0f;
+        Motor1_Lucheng = 0.0f;
+        Motor2_Lucheng = 0.0f;
+    }
+
+    /* ---- 速度低通滤波 ---- */
+    Motor1_SpeedFlt = (1.0f - SPEED_FLT_ALPHA) * Motor1_SpeedFlt
+                    + SPEED_FLT_ALPHA * Motor1_Speed;
+    Motor2_SpeedFlt = (1.0f - SPEED_FLT_ALPHA) * Motor2_SpeedFlt
+                    + SPEED_FLT_ALPHA * Motor2_Speed;
+
+    /* ---- 环形缓冲：写入当前滤波速度 ---- */
+    accelBufL[accelIdx] = Motor1_SpeedFlt;
+    accelBufR[accelIdx] = Motor2_SpeedFlt;
+    accelIdx++;
+    if (accelIdx >= ACCEL_BUF_SIZE) {
+        accelIdx = 0U;
+        accelFull = 1U;
+    }
+
+    /* ---- 加速度 = 最新速度 - 最旧速度 / 窗口时间 ---- */
+    if (accelFull != 0U) {
+        /* 环形缓冲下一个位置就是"最旧的" */
+        uint8_t oldest = accelIdx;  /* 当前 idx 已指向下一个写入位 = 最旧 */
+        float aL = (Motor1_SpeedFlt - accelBufL[oldest]) / ACCEL_WINDOW_S;
+        float aR = (Motor2_SpeedFlt - accelBufR[oldest]) / ACCEL_WINDOW_S;
+
+        /* 加速度低通滤波 */
+        Motor1_Accel = (1.0f - ACCEL_FLT_ALPHA) * Motor1_Accel
+                     + ACCEL_FLT_ALPHA * aL;
+        Motor2_Accel = (1.0f - ACCEL_FLT_ALPHA) * Motor2_Accel
+                     + ACCEL_FLT_ALPHA * aR;
+    } else {
+        Motor1_Accel = 0.0f;
+        Motor2_Accel = 0.0f;
+    }
 }

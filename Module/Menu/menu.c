@@ -5,7 +5,7 @@
 #include "oled.h"
 
 #define MENU_MAIN_ITEM_COUNT (3U) /**< MENU_MAIN_ITEM_COUNT 应用层配置宏。 */
-#define MENU_TASK_ITEM_COUNT (4U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
+#define MENU_TASK_ITEM_COUNT (5U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
 #define MENU_LINE_LENGTH     (16U) /**< MENU_LINE_LENGTH 应用层配置宏。 */
 
 static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
@@ -278,15 +278,27 @@ static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
  */
 static void Menu_RenderTasks(const Menu_State *state)
 {
-    uint8_t index;
+    uint8_t i;
+    uint8_t start;  /* 滚动窗口起始索引 */
     char line[MENU_LINE_LENGTH + 1U];
 
-    for (index = 0U; index < MENU_TASK_ITEM_COUNT; index++) {
+    /* 计算滚动窗口：保证当前选中项在可见区域内 */
+    if (MENU_TASK_ITEM_COUNT <= MENU_VISIBLE_LINE_COUNT) {
+        start = 0U;
+    } else {
+        start = state->taskSelection;
+        if (start > (uint8_t)(MENU_TASK_ITEM_COUNT - MENU_VISIBLE_LINE_COUNT)) {
+            start = (uint8_t)(MENU_TASK_ITEM_COUNT - MENU_VISIBLE_LINE_COUNT);
+        }
+    }
+
+    for (i = 0U; i < MENU_VISIBLE_LINE_COUNT && (start + i) < MENU_TASK_ITEM_COUNT; i++) {
+        uint8_t idx = (uint8_t)(start + i);
         (void) snprintf(line, sizeof(line), "%c%c Task %u",
-                        (index == state->taskSelection) ? '>' : ' ',
-                        ((index + 1U) == state->activeTask) ? '*' : ' ',
-                        (unsigned int) (index + 1U));
-        Menu_DrawLine(index, line);
+                        (idx == state->taskSelection) ? '>' : ' ',
+                        ((idx + 1U) == state->activeTask) ? '*' : ' ',
+                        (unsigned int) (idx + 1U));
+        Menu_DrawLine(i, line);
     }
 }
 

@@ -23,8 +23,12 @@
 
 //?0:1
 //!=0?0x01:0x00
-extern float Motor1_Speed; /**< 左轮实测速度。 */
-extern float Motor2_Speed; /**< 右轮实测速度。 */
+extern float Motor1_Speed;    /**< 左轮原始速度(cm/s)。 */
+extern float Motor2_Speed;    /**< 右轮原始速度(cm/s)。 */
+extern float Motor1_SpeedFlt; /**< 左轮滤波速度(cm/s)。 */
+extern float Motor2_SpeedFlt; /**< 右轮滤波速度(cm/s)。 */
+extern float Motor1_Accel;    /**< 左轮加速度(cm/s²)。 */
+extern float Motor2_Accel;    /**< 右轮加速度(cm/s²)。 */
 extern float Measure_Distance; /**< Measure_Distance 全局状态或配置变量。 */
 
 extern int32_t Motor1_Encoder_Value; /**< 左轮编码器累计计数。 */
@@ -44,9 +48,9 @@ void Motor1_Get_Speed(void);
 void Motor2_Get_Speed(void);
 //测量所有电机速度
 /**
- * @brief 根据编码器计数计算左右轮速度。
+ * @brief 根据编码器计数计算左右轮速度 + 滤波速度 + 加速度。
  * @param 无。
- * @note 根据当前工程三层结构封装，供上层模块调用。
+ * @note 每20ms调用一次。内部自动更新 Motor1_SpeedFlt、Motor1_Accel 等。
  * @retval 无。
  */
 void MEASURE_MOTORS_SPEED(void);

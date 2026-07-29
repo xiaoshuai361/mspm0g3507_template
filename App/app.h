@@ -167,8 +167,10 @@ void App_Task3Run(void);
  */
 void App_Task4Run(void);
 
+void App_Task5Run(void);
+
 /**
- * @brief 根据菜单当前任务编号分发执行 Task 1~4。
+ * @brief 根据菜单当前任务编号分发执行 Task 1~5。
  * @param 无。
  * @note 在 App_Run() 中周期调用；未选择任务时不执行任何任务逻辑。
  * @retval 无。
