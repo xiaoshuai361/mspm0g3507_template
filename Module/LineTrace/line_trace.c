@@ -136,3 +136,59 @@ const char *LineTrace_StateName(LineTrace_State state)
             return "UNKNOWN";
     }
 }
+
+/* ================================================================
+ * 横切线检测（传感器输出 1=黑线，高有效）
+ * 条件：>=4路黑 + D3~D6全黑 + 锁定期外 + 连续2帧确认
+ * ================================================================ */
+/* 红外传感器：0=黑线(低有效)，与 STM32 tracking.c 一致 */
+static uint8_t CrossBitActive(uint8_t raw, uint8_t bit)
+{
+    return ((raw >> bit) & 0x01U) == 0U ? 1U : 0U;
+}
+
+CrossLine_Type LineTrace_DetectCrossLine(uint8_t raw, uint8_t activeCount,
+                                          uint16_t *lockoutFrames, uint8_t *confirmCount)
+{
+    /* 锁定期内递减 */
+    if ((lockoutFrames != 0) && (*lockoutFrames > 0U)) {
+        (*lockoutFrames)--;
+        return CROSS_LINE_NONE;
+    }
+
+    /* 至少3路黑（正常循迹≤2路，不会误触） */
+    if (activeCount < 3U) {
+        *confirmCount = 0U;
+        return CROSS_LINE_NONE;
+    }
+
+    /* 存在任意连续3路全黑（比4路宽松，防跳变漏检） */
+    {
+        uint8_t b0 = CrossBitActive(raw, 0U), b1 = CrossBitActive(raw, 1U);
+        uint8_t b2 = CrossBitActive(raw, 2U), b3 = CrossBitActive(raw, 3U);
+        uint8_t b4 = CrossBitActive(raw, 4U), b5 = CrossBitActive(raw, 5U);
+        uint8_t b6 = CrossBitActive(raw, 6U), b7 = CrossBitActive(raw, 7U);
+        uint8_t ok = 0U;
+        if (b0 && b1 && b2) ok = 1U;  /* D1-D3 */
+        if (b1 && b2 && b3) ok = 1U;  /* D2-D4 */
+        if (b2 && b3 && b4) ok = 1U;  /* D3-D5 */
+        if (b3 && b4 && b5) ok = 1U;  /* D4-D6 */
+        if (b4 && b5 && b6) ok = 1U;  /* D5-D7 */
+        if (b5 && b6 && b7) ok = 1U;  /* D6-D8 */
+        if (ok == 0U) {
+            *confirmCount = 0U;
+            return CROSS_LINE_NONE;
+        }
+    }
+
+    /* 1帧即确认（横切线短，车速快，等不了2帧） */
+    if (lockoutFrames != 0) *lockoutFrames = 80U;
+    *confirmCount = 0U;
+    return CROSS_LINE_DETECTED;
+}
+
+void LineTrace_ResetCrossDetect(uint16_t *lockoutFrames, uint8_t *confirmCount)
+{
+    if (lockoutFrames != 0) *lockoutFrames = 0U;
+    if (confirmCount != 0) *confirmCount = 0U;
+}

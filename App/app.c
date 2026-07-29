@@ -10,8 +10,11 @@
 #include "dl1a_test.h"
 #include "Grayscale_Sensor.h"
 #include "key5d_test.h"
+#include "line_trace.h"
 #include "line_trace_test.h"
 #include "menu_test.h"
+#include "motor.h"
+#include "Encoder.h"
 #include "oled.h"
 #include "uart.h"
 
@@ -27,9 +30,6 @@ volatile uint32_t g_bt_command_self_test_failures; /**< 蓝牙车辆命令解析
 volatile uint32_t g_bt_command_self_test_complete; /**< 蓝牙车辆命令解析自检已执行标志。 */
 
 static uint32_t lastBatteryTick; /**< 上一次电池电压采样时间戳。 */
-static uint32_t lastGrayscaleDisplayTick; /**< 上一次灰度 OLED 刷新时间戳。 */
-
-#define APP_GRAYSCALE_DISPLAY_PERIOD_MS (100U) /**< 灰度 OLED 刷新周期，单位 ms。 */
 
 /**
  * @brief 输出上电软件自检结果。
@@ -147,50 +147,204 @@ static void App_BatteryRun(void)
     App_MenuSetBatteryData(batteryMv, batteryLow);
 }
 
-/**
- * @brief 读取 8 路灰度传感器并在 OLED 上显示各通道值。
- * @param 无。
- * @note 每 APP_GRAYSCALE_DISPLAY_PERIOD_MS 刷新一次；仅显示不输出电机控制。
- * @retval 无。
+/*
+ * 直线循迹 + 启停线停车测试
+ * 上电后显示传感器值，按右键启动循迹，遇横切线急刹停车。
  */
 static void App_GrayscaleDisplayRun(void)
 {
+    enum { T_IDLE, T_TRACKING, T_BRAKE, T_STOPPED };
+
     const uint32_t now = BSP_Delay_GetTick();
     uint8_t raw;
     char line[17];
 
-    if ((uint32_t)(now - lastGrayscaleDisplayTick) < APP_GRAYSCALE_DISPLAY_PERIOD_MS)
-    {
-        return;
-    }
-    lastGrayscaleDisplayTick = now;
+    static uint8_t  state = T_IDLE;
+    static uint32_t lastTick;
+    static uint16_t crossLockout;
+    static uint8_t  crossConfirm;
+    static uint32_t detectCount;
+    static int16_t  sLeft, sRight;  /* 整形后的 PWM */
+    static uint32_t startTick;
+    static float    prevErr;    /* 滤波状态 */
+    static int16_t  trimBias;   /* 自校准偏置 */
+    static int32_t  calibSum;   /* 校准累积 */
+    static uint16_t calibCnt;   /* 校准采样数 */
+    static uint16_t calFrame;   /* 帧计数 */
 
+    uint8_t  activeCount;
+    int16_t  errorTenths;
+    uint8_t  crossNow;
+
+    if ((uint32_t)(now - lastTick) < 20U) return;
+    lastTick = now;
+
+    /* ---- 读灰度 ---- */
     Grayscale_Read();
     raw = Grayscale_GetRaw();
+    (void)LineTrace_CalcActiveLowWeightedError(raw, &errorTenths, &activeCount);
 
+    /* ---- 横切线实时判定：任意连续3路全黑 ---- */
+    {
+        uint8_t b0 = (((raw >> 0) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b1 = (((raw >> 1) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b2 = (((raw >> 2) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b3 = (((raw >> 3) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b4 = (((raw >> 4) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b5 = (((raw >> 5) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b6 = (((raw >> 6) & 1U) == 0U) ? 1U : 0U;
+        uint8_t b7 = (((raw >> 7) & 1U) == 0U) ? 1U : 0U;
+        crossNow = ((b0&&b1&&b2)||(b1&&b2&&b3)||(b2&&b3&&b4)
+                 ||(b3&&b4&&b5)||(b4&&b5&&b6)||(b5&&b6&&b7)) ? 1U : 0U;
+    }
+
+    /* ---- 状态机 ---- */
+    switch (state) {
+
+    case T_IDLE:
+        Set_Speed(0, 0);
+        /* 等右键按下 */
+        {
+            Key5D_Event ev = KEY5D_EVENT_NONE;
+            if (App_InputPoll(now, &ev) && ev == KEY5D_EVENT_PRESSED
+                && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
+                state = T_TRACKING;
+                Encoder_Init();
+                LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
+                detectCount = 0U;
+                sLeft = sRight = 600;
+                prevErr = 0.0f;
+                calibSum = 0;
+                calibCnt = 0;
+                calFrame = 0;
+                trimBias = 0;
+                startTick = now;
+                uart0_send_string("TRACK START\r\n");
+            }
+        }
+        break;
+
+    case T_TRACKING:
+        /* 横切线检测 + 计数 */
+        if (LineTrace_DetectCrossLine(raw, activeCount, &crossLockout, &crossConfirm)
+            == CROSS_LINE_DETECTED) {
+            detectCount++;
+            state = T_BRAKE;
+            uart0_send_string("STOP LINE!\r\n");
+            break;
+        }
+
+        /* 循迹修正：P 控制 + 固定偏置补偿机械不对称 */
+        {
+            int16_t err = errorTenths;
+            int16_t corr;
+            static uint8_t lostCnt;
+            float fe;
+            #define CALIB_FRAMES 200           /* 前200帧(~4s)校准 */
+            #define CALIB_SKIP    20           /* 跳过前20帧(车未稳) */
+
+            /* 丢线处理 */
+            if (activeCount == 0U) {
+                lostCnt++;
+                err = (prevErr > 0) ? (int16_t)(prevErr * 1.5f) : (int16_t)(prevErr * 1.5f);
+                if (lostCnt > 60U) { Set_Speed(0, 0); state = T_STOPPED; break; }
+            } else {
+                lostCnt = 0U;
+                if (err >= -3 && err <= 3) err = 0;
+                fe = (float)err;
+                fe = 0.7f * prevErr + 0.3f * fe;
+                prevErr = fe;
+                err = (int16_t)fe;
+            }
+
+            /* 校准：跳过起步不稳，|err|<5 时采样，×1.5 补偿 */
+            calFrame++;
+            if (calibCnt < CALIB_FRAMES && calFrame > CALIB_SKIP) {
+                if (err >= -5 && err <= 5) {
+                    calibSum += err;
+                    calibCnt++;
+                }
+            }
+            if (calibCnt > 0) {
+                trimBias = (int16_t)((-calibSum * 3) / ((int32_t)calibCnt * 2));
+            }
+
+            /* P 修正 + 自校准偏置 */
+            corr = (int16_t)(((int32_t)err * 12) / 10) + trimBias;
+            if (corr > 150) corr = 150;
+            if (corr < -150) corr = -150;
+
+            /* 目标 PWM */
+            int16_t tl = (int16_t)(600 + corr);
+            int16_t tr = (int16_t)(600 - corr);
+            int16_t d;
+            if (tl < 0) tl = 0; if (tl > 1800) tl = 1800;
+            if (tr < 0) tr = 0; if (tr > 1800) tr = 1800;
+
+            /* 变化率限制（更平缓） */
+            int16_t rate = (sLeft < 200) ? 80 : 30;
+            d = (int16_t)(tl - sLeft);
+            if (d > rate) sLeft += rate; else if (d < -rate) sLeft -= rate; else sLeft = tl;
+            d = (int16_t)(tr - sRight);
+            if (d > rate) sRight += rate; else if (d < -rate) sRight -= rate; else sRight = tr;
+
+            Set_Speed((int)sLeft, (int)sRight);
+        }
+        break;
+
+    case T_BRAKE:
+        /* 平缓减速：直接停转，靠惯性滑行 */
+        Set_Speed(0, 0);
+        state = T_STOPPED;
+        uart0_send_string("STOPPED\r\n");
+        break;
+
+    case T_STOPPED:
+        /* 保持停车 */
+        /* 按右键重新开始 */
+        {
+            Key5D_Event ev = KEY5D_EVENT_NONE;
+            if (App_InputPoll(now, &ev) && ev == KEY5D_EVENT_PRESSED
+                && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
+                state = T_TRACKING;
+                LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
+                detectCount = 0U;
+                sLeft = sRight = 600;
+                prevErr = 0.0f;
+                calibSum = 0;
+                calibCnt = 0;
+                calFrame = 0;
+                trimBias = 0;
+                startTick = now;
+                uart0_send_string("TRACK START\r\n");
+            }
+        }
+        break;
+    }
+
+    /* ---- OLED ---- */
     OLED_ClearBuffer();
 
-    /* 第 1 行：通道编号 D8(MSB) → D1(LSB) */
-    OLED_ShowString(0U, 0U, "GS D8..D1", 16U, 1U);
-
-    /* 第 2 行：每通道 0/1 状态 */
     (void)snprintf(line, sizeof(line), "%u%u%u%u%u%u%u%u",
-                   (unsigned int)((raw >> 7) & 0x01U),
-                   (unsigned int)((raw >> 6) & 0x01U),
-                   (unsigned int)((raw >> 5) & 0x01U),
-                   (unsigned int)((raw >> 4) & 0x01U),
-                   (unsigned int)((raw >> 3) & 0x01U),
-                   (unsigned int)((raw >> 2) & 0x01U),
-                   (unsigned int)((raw >> 1) & 0x01U),
-                   (unsigned int)(raw & 0x01U));
+                   (unsigned)((raw >> 7) & 1), (unsigned)((raw >> 6) & 1),
+                   (unsigned)((raw >> 5) & 1), (unsigned)((raw >> 4) & 1),
+                   (unsigned)((raw >> 3) & 1), (unsigned)((raw >> 2) & 1),
+                   (unsigned)((raw >> 1) & 1), (unsigned)(raw & 1));
+    OLED_ShowString(0U, 0U, line, 16U, 1U);
+
+    (void)snprintf(line, sizeof(line), "STOP:%s %s",
+                   crossNow ? "YES" : "no ",
+                   (state == T_IDLE) ? "RIGHT->go" :
+                   (state == T_STOPPED) ? "DONE" : "");
     OLED_ShowString(0U, 16U, line, 16U, 1U);
 
-    /* 第 3 行：原始 hex 值 */
-    (void)snprintf(line, sizeof(line), "hex=0x%02X", (unsigned int)raw);
+    (void)snprintf(line, sizeof(line), "C:%lu T:%d sL=%d",
+                   (unsigned long)detectCount, (int)trimBias, (int)sLeft);
     OLED_ShowString(0U, 32U, line, 16U, 1U);
 
-    /* 第 4 行：传感器读数时间戳（取低 4 位 hex 简化显示） */
-    (void)snprintf(line, sizeof(line), "tick=%04lX", (unsigned long)(now & 0xFFFFUL));
+    (void)snprintf(line, sizeof(line), "0x%02X t=%lus",
+                   (unsigned)raw,
+                   (unsigned long)((now - startTick) / 1000UL));
     OLED_ShowString(0U, 48U, line, 16U, 1U);
 
     OLED_Refresh();
@@ -208,7 +362,6 @@ void App_Init(void)
     App_InputInit();
     App_MenuInitData();
     lastBatteryTick = BSP_Delay_GetTick() - APP_BATTERY_SAMPLE_PERIOD_MS;
-    lastGrayscaleDisplayTick = BSP_Delay_GetTick() - APP_GRAYSCALE_DISPLAY_PERIOD_MS;
 
     /* 软件自检只检查纯逻辑，硬件在线状态由各任务首次运行时再诊断。 */
     g_key5d_self_test_failures = Key5D_RunSelfTest();
