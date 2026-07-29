@@ -2,6 +2,9 @@
 .vscode/
 .vscode/local.env.json
 
+# Claude/Copilot skills (local dev only)
+skills/
+
 # CCS / SysConfig generated build outputs
 Debug/
 Release/

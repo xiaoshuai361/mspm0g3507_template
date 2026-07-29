@@ -8,6 +8,7 @@
 #include "bluetooth_command_test.h"
 #include "delay.h"
 #include "dl1a_test.h"
+#include "Grayscale_Sensor.h"
 #include "key5d_test.h"
 #include "line_trace_test.h"
 #include "menu_test.h"
@@ -26,6 +27,9 @@ volatile uint32_t g_bt_command_self_test_failures; /**< 蓝牙车辆命令解析
 volatile uint32_t g_bt_command_self_test_complete; /**< 蓝牙车辆命令解析自检已执行标志。 */
 
 static uint32_t lastBatteryTick; /**< 上一次电池电压采样时间戳。 */
+static uint32_t lastGrayscaleDisplayTick; /**< 上一次灰度 OLED 刷新时间戳。 */
+
+#define APP_GRAYSCALE_DISPLAY_PERIOD_MS (100U) /**< 灰度 OLED 刷新周期，单位 ms。 */
 
 /**
  * @brief 输出上电软件自检结果。
@@ -144,6 +148,55 @@ static void App_BatteryRun(void)
 }
 
 /**
+ * @brief 读取 8 路灰度传感器并在 OLED 上显示各通道值。
+ * @param 无。
+ * @note 每 APP_GRAYSCALE_DISPLAY_PERIOD_MS 刷新一次；仅显示不输出电机控制。
+ * @retval 无。
+ */
+static void App_GrayscaleDisplayRun(void)
+{
+    const uint32_t now = BSP_Delay_GetTick();
+    uint8_t raw;
+    char line[17];
+
+    if ((uint32_t)(now - lastGrayscaleDisplayTick) < APP_GRAYSCALE_DISPLAY_PERIOD_MS)
+    {
+        return;
+    }
+    lastGrayscaleDisplayTick = now;
+
+    Grayscale_Read();
+    raw = Grayscale_GetRaw();
+
+    OLED_ClearBuffer();
+
+    /* 第 1 行：通道编号 D8(MSB) → D1(LSB) */
+    OLED_ShowString(0U, 0U, "GS D8..D1", 16U, 1U);
+
+    /* 第 2 行：每通道 0/1 状态 */
+    (void)snprintf(line, sizeof(line), "%u%u%u%u%u%u%u%u",
+                   (unsigned int)((raw >> 7) & 0x01U),
+                   (unsigned int)((raw >> 6) & 0x01U),
+                   (unsigned int)((raw >> 5) & 0x01U),
+                   (unsigned int)((raw >> 4) & 0x01U),
+                   (unsigned int)((raw >> 3) & 0x01U),
+                   (unsigned int)((raw >> 2) & 0x01U),
+                   (unsigned int)((raw >> 1) & 0x01U),
+                   (unsigned int)(raw & 0x01U));
+    OLED_ShowString(0U, 16U, line, 16U, 1U);
+
+    /* 第 3 行：原始 hex 值 */
+    (void)snprintf(line, sizeof(line), "hex=0x%02X", (unsigned int)raw);
+    OLED_ShowString(0U, 32U, line, 16U, 1U);
+
+    /* 第 4 行：传感器读数时间戳（取低 4 位 hex 简化显示） */
+    (void)snprintf(line, sizeof(line), "tick=%04lX", (unsigned long)(now & 0xFFFFUL));
+    OLED_ShowString(0U, 48U, line, 16U, 1U);
+
+    OLED_Refresh();
+}
+
+/**
  * @brief 初始化 App 层公共资源。
  * @param 无。
  * @note 初始化输入、菜单、自检、UART0 和 OLED；车辆/IMU/ToF 在各自任务首次运行时初始化。
@@ -155,6 +208,7 @@ void App_Init(void)
     App_InputInit();
     App_MenuInitData();
     lastBatteryTick = BSP_Delay_GetTick() - APP_BATTERY_SAMPLE_PERIOD_MS;
+    lastGrayscaleDisplayTick = BSP_Delay_GetTick() - APP_GRAYSCALE_DISPLAY_PERIOD_MS;
 
     /* 软件自检只检查纯逻辑，硬件在线状态由各任务首次运行时再诊断。 */
     g_key5d_self_test_failures = Key5D_RunSelfTest();
@@ -197,13 +251,16 @@ void App_Run(void)
     // App_Key5DTestRun();
     App_BatteryRun();
     App_ElectromagnetRun();
-    App_MenuRun();
+    // App_MenuRun();        /* 注释：原 OLED 多级菜单系统 */
+
+    /* 灰度传感器 8 路 OLED 直显（不执行循迹/电机控制） */
+    App_GrayscaleDisplayRun();
 
     /* 可选模块：这些任务都是非阻塞轮询，启停只需要保留或注释对应调用。 */
-    App_ImuRun();
-    App_ToFRun();
-    App_VehicleRun();
+    // App_ImuRun();
+    // App_ToFRun();
+    // App_VehicleRun();     /* 注释：原车辆循迹+电机 PID 闭环 */
 
     /* 菜单任务接口：进入 Task 1~4 后，自动分发到对应 App_TaskXRun()。 */
-    App_TasksRun();
+    // App_TasksRun();       /* 注释：原 Task1~4 分发 */
 }
