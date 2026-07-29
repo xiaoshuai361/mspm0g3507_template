@@ -5,7 +5,7 @@ set "WORKSPACE=%~1"
 set "DSLITE=%~2"
 
 if "%WORKSPACE%"=="" set "WORKSPACE=%CD%"
-if "%DSLITE%"=="" set "DSLITE=D:\APPs\TI\Unflsh\dslite.bat"
+if "%DSLITE%"=="" set "DSLITE=D:\ti\CCS\ccs\ccs_base\DebugServer\bin\DSLite.exe"
 
 set "CCXML=%WORKSPACE%\targetConfigs\MSPM0G3507.ccxml"
 set "PROGRAM=%WORKSPACE%\Debug\cy_template.out"
@@ -27,14 +27,14 @@ if not exist "%PROGRAM%" (
     exit /b 1
 )
 
-echo [flash] Probe: J-Link via CCS/UniFlash DSLite
+echo [flash] Probe: J-Link via CCS DSLite
 echo [flash] Target config: %CCXML%
 echo [flash] Program: %PROGRAM%
 if exist "%MAPFILE%" (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WORKSPACE%\.vscode\scripts\show-memory-usage.ps1" -MapFile "%MAPFILE%"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WORKSPACE%\tools\vscode\show-memory-usage.ps1" -MapFile "%MAPFILE%"
 )
 echo.
 
-"%DSLITE%" --config="%CCXML%" -e -r 2 -u "%PROGRAM%"
+"%DSLITE%" flash --config="%CCXML%" -e -r 2 -u "%PROGRAM%"
 
 exit /b %ERRORLEVEL%

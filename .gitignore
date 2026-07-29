@@ -1,11 +1,19 @@
 # Local machine configuration
 .vscode/
+.vscode/local.env.json
 
 # CCS / SysConfig generated build outputs
 Debug/
 Release/
 Objects/
 Listings/
+
+# CCS project metadata (auto-generated per-machine)
+.project
+.cproject
+.ccsproject
+.settings/
+.syscfgmeta/
 
 # Local caches and downloaded installers
 .headroom-cache/
@@ -27,4 +35,6 @@ installers/
 # OS/editor noise
 .DS_Store
 Thumbs.db
-.vscode/local.env.json
+*.swp
+*.swo
+*~
