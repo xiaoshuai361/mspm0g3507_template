@@ -67,11 +67,13 @@ enum {
 typedef struct {
     uint8_t state;
     uint8_t startKeyArmed;
+    uint8_t stopOnCurve;       /* 1=遇弯道停车(Task3) */
     uint32_t lastTick;
     uint32_t startTick;
     uint32_t brakeStartTick;
     uint16_t crossLockout;
     uint8_t crossConfirm;
+    uint8_t curveConfirmCnt;   /* 弯道确认计数 */
     LineTrace_Controller controller;
 } App_LineLapContext;
 
@@ -118,12 +120,11 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
     .lostStopFrames = 150U,
 };
 
-static App_LineLapContext task1LineContext = {
-    .startKeyArmed = 1U
-};
-static App_LineLapContext task2LineContext = {
-    .startKeyArmed = 1U
-};
+static App_LineLapContext task1LineContext = { .startKeyArmed = 1U };
+static App_LineLapContext task3LineContext = {
+    .startKeyArmed = 1U, .stopOnCurve = 1U };
+static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
+static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
 
 static void App_LineLapReset(App_LineLapContext *context)
 {
@@ -176,6 +177,7 @@ static void App_LineLapRun(App_LineLapContext *context,
         LineTrace_ResetCrossDetect(&context->crossLockout,
                                    &context->crossConfirm);
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
+        context->curveConfirmCnt = 0U;
         Set_Speed(0, 0);
         (void)snprintf(message, sizeof(message), "T%u: START\r\n",
                        (unsigned int)taskNumber);
@@ -222,6 +224,21 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
 
+    /* 弯道停车(Task3)：|偏差|>15 连续5帧 → 停车 */
+    if (context->stopOnCurve != 0U) {
+        if (errorTenths > 15 || errorTenths < -15) {
+            context->curveConfirmCnt++;
+            if (context->curveConfirmCnt >= 5U) {
+                Set_Speed(0, 0);
+                context->state = APP_LINE_LAP_STOPPED;
+                uart0_send_string("T3: CURVE STOP\r\n");
+                return;
+            }
+        } else {
+            context->curveConfirmCnt = 0U;
+        }
+    }
+
     LineTrace_ControllerStep(&context->controller, config,
                              hasLine, errorTenths, &controlOutput);
     if (controlOutput.shouldStop != 0U) {
@@ -238,57 +255,38 @@ static void App_LineLapRun(App_LineLapContext *context,
     Set_Speed((int)controlOutput.leftPwm, (int)controlOutput.rightPwm);
 }
 
-/* Task 1：1100 PWM竞速档，单圈后在A停车。 */
+/* Task 1：1100 PWM 竞速档 + 遇A停车。 */
 void App_Task1Run(void)
 {
     App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U,
                    APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS);
 }
 
-/* Task 2：加速前的600 PWM稳定档，巡线与停车逻辑同Task 1。 */
+/* Task 2：静止，暂无操作（题3摆球控制，队友负责）。 */
 void App_Task2Run(void)
 {
-    App_LineLapRun(&task2LineContext, &task2StableControlConfig, 2U,
+    Set_Speed(0, 0);
+}
+
+/* Task 3：稳定档直线循迹 + 遇弯道停车（B点=入弯检测）。 */
+void App_Task3Run(void)
+{
+    App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U,
                    0, 0U);
 }
 
-/*
- * ================================================================
- *  Task 3 —— 题4：A→B 直线循迹 + 经过B
- *
- *  指标：AB时间 ≤8s
- *  B点无标记，用 IMU gyro_z 检测入弯事件作为 B 点通过标志。
- * ================================================================
- */
-void App_Task3Run(void)
-{
-    /* TODO: Task1 直道参数 + B点检测 */
-}
-
-/*
- * ================================================================
- *  Task 4 —— 题5：单圈循迹 + 经过A（不停车）
- *
- *  指标：≤30s，钢球稳定在摆杆中心 O（±1cm）
- *  循迹使用 APP_BALL_LINE_CRUISE_PWM=600 稳定档，检测到A后只记录时间不停车。
- * ================================================================
- */
+/* Task 4：稳定档 + 遇A停车（同Task2稳定参数）。 */
 void App_Task4Run(void)
 {
-    /* TODO: 使用 APP_BALL_LINE_CRUISE_PWM 稳定档，检测A后不停车。 */
+    App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U,
+                   0, 0U);
 }
 
-/*
- * ================================================================
- *  Task 5 —— 题6：单圈循迹 + 经过A（不停车）+ 球任意位置
- *
- *  指标：≤30s，钢球稳定在摆杆任意指定位置（±1cm）
- *  循迹同 Task4，保留 APP_BALL_LINE_CRUISE_PWM=600，球控制区别于 Task4。
- * ================================================================
- */
+/* Task 5：稳定档 + 遇A停车（同Task2稳定参数）。 */
 void App_Task5Run(void)
 {
-    /* TODO: 使用 APP_BALL_LINE_CRUISE_PWM 稳定档，球控制由队友补充。 */
+    App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U,
+                   0, 0U);
 }
 
 /*
@@ -303,7 +301,9 @@ void App_TasksRun(void)
     if (g_active_task != previousTask) {
         Set_Speed(0, 0);
         App_LineLapReset(&task1LineContext);
-        App_LineLapReset(&task2LineContext);
+        App_LineLapReset(&task3LineContext);
+        App_LineLapReset(&task4LineContext);
+        App_LineLapReset(&task5LineContext);
         previousTask = g_active_task;
     }
 

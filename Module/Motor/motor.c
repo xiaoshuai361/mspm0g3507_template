@@ -4,6 +4,9 @@ static uint8_t motorPwmStarted;
 static int8_t motorLeftDirection;
 static int8_t motorRightDirection;
 
+/* 兼容旧调用，当前不需要额外初始化 */
+void Motor_Init(void) {}
+
 static int Motor_ClampPwm(int pwm)
 {
     if (pwm > 1999) {
