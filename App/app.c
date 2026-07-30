@@ -52,379 +52,177 @@ static void App_LogSelfTests(void)
     uart0_send_string(message);
 }
 
-/*
- * ================================================================
- *  Task 1 —— 题2：单圈循迹 + 精确停在A
- *
- *  指标：单圈 ≤20s，停车偏差 ≤2cm
- *  操作：菜单选中 Task 1 后按右键启动
- *
- *  算法：
- *    直道（方法一）：P=1.2, 死区±3, 低通α=0.7, 自校准偏置, 限幅±150, 缓变30/frame
- *    弯道（待测）：IMU gyro_z 检测，P=3.0, 无死区, 低通α=0.3, 限幅±300, 变速60/frame
- *    横切线：≥3路黑 + 任意连续3路黑 → 1帧确认 → 停车
- *    丢线：  保持最后偏差方向+逐步加大找线，60帧仍丢线→停车
- *    自校准：前200帧(跳过起步20帧)，|err|<5时采样，trimBias = -avg×1.5
- * ================================================================
- */
-void App_Task1Run(void)
+enum {
+    APP_LINE_LAP_IDLE,
+    APP_LINE_LAP_TRACKING,
+    APP_LINE_LAP_STOPPED
+};
+
+enum {
+    APP_LINE_CONTROL_PERIOD_MS = 10U,
+    APP_LINE_CROSS_LOCKOUT_FRAMES = 80U
+};
+
+typedef struct {
+    uint8_t state;
+    uint8_t startKeyArmed;
+    uint32_t lastTick;
+    uint32_t startTick;
+    uint16_t crossLockout;
+    uint8_t crossConfirm;
+    LineTrace_Controller controller;
+} App_LineLapContext;
+
+static const LineTrace_ControlConfig task1FastControlConfig = {
+    .cruisePwm = APP_TASK1_LINE_CRUISE_PWM,
+    .lostPwm = 650,
+    .rampUpStep = 20,
+    .rampDownStep = 35,
+    .curveSlowdownGain = 12,
+    .steeringKp = 3,
+    .edgeSteeringKp = 14,
+    .edgeSteeringThreshold = 8,
+    .steeringMax = 300,
+    .centerDeadband = 5,
+    .fastErrorThreshold = 15,
+    .fastDeltaThreshold = 12,
+    .lostSearchStartError = 12,
+    .lostSearchStepFrames = 4U,
+    .lostHoldFrames = 3U,
+    .lostStopFrames = 120U,
+};
+
+static const LineTrace_ControlConfig task2StableControlConfig = {
+    .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
+    .lostPwm = 480,
+    .rampUpStep = 15,
+    .rampDownStep = 8,
+    .curveSlowdownGain = 1,
+    .steeringKp = 3,
+    .edgeSteeringKp = 8,
+    .edgeSteeringThreshold = 8,
+    .steeringMax = 160,
+    .centerDeadband = 5,
+    .fastErrorThreshold = 15,
+    .fastDeltaThreshold = 12,
+    .lostSearchStartError = 12,
+    .lostSearchStepFrames = 4U,
+    .lostHoldFrames = 3U,
+    .lostStopFrames = 120U,
+};
+
+static App_LineLapContext task1LineContext = {
+    .startKeyArmed = 1U
+};
+static App_LineLapContext task2LineContext = {
+    .startKeyArmed = 1U
+};
+
+static void App_LineLapReset(App_LineLapContext *context)
 {
-    enum { T1_IDLE, T1_TRACKING, T1_STOPPED };
-
-    const uint32_t now = BSP_Delay_GetTick();
-    uint8_t  raw;
-    char     line[17];
-
-    /* 持久状态 */
-    static uint8_t  state = T1_IDLE;
-    static uint8_t  lastActive;
-    static uint32_t lastTick;
-    static uint32_t startTick;
-    static uint16_t crossLockout;       /* 横切线锁定期(帧) */
-    static uint8_t  crossConfirm;       /* 横切线确认计数 */
-    static uint32_t detectCount;        /* 累计检测次数 */
-    static int16_t  sLeft = 600;        /* 整形后左PWM */
-    static int16_t  sRight = 600;       /* 整形后右PWM */
-    static float    prevErr;            /* 偏差低通滤波历史 */
-    static int16_t  trimBias;           /* 自校准偏置(PWM) */
-    static int32_t  calibSum;           /* 校准偏差累积 */
-    static uint16_t calibCnt;           /* 校准采样帧数 */
-    static uint16_t calFrame;           /* 启动后帧计数 */
-
-    /* 临时变量 */
-    uint8_t  activeCount;               /* 检测到黑线的通道数 */
-    uint8_t  onCurve = 0U;              /* 弯道标志 */
-    int16_t  errorTenths;               /* 加权偏差(0.1路间距) */
-
-    /* ---- 菜单重入检测 ---- */
-    if (lastActive != 1U) {
-        lastActive = 1U;  state = T1_IDLE;  lastTick = 0U;
-        sLeft=600; sRight=600; detectCount=0U; crossLockout=0U; crossConfirm=0U;
-        prevErr=0.0f; trimBias=0; calibSum=0; calibCnt=0; calFrame=0;
-        Set_Speed(0, 0);
-        LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
-    }
-
-    /* ---- 按键检测(不限速) ---- */
-    {
-        Key5D_Event ev = KEY5D_EVENT_NONE;
-        if (App_InputPoll(now, &ev) && ev == KEY5D_EVENT_PRESSED
-            && App_InputGetStableKey() == KEY5D_KEY_RIGHT
-            && state == T1_IDLE) {
-            state = T1_TRACKING;
-            Encoder_Init();
-            LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
-            detectCount=0U; sLeft=600; sRight=600; prevErr=0.0f; trimBias=0;
-            calibSum=0; calibCnt=0; calFrame=0; startTick=now;
-            uart0_send_string("T1: START\r\n");
-        }
-    }
-
-    /* IDLE状态不做后续处理 */
-    if (state == T1_IDLE) { Set_Speed(0, 0); return; }
-
-    /* ---- 20ms 固定节拍 ---- */
-    if ((uint32_t)(now - lastTick) < 20U) return;
-    lastTick = now;
-
-    /* ---- 灰度采样 + 偏差计算 ---- */
-    Grayscale_Read();
-    raw = Grayscale_GetRaw();
-    (void)LineTrace_CalcActiveLowWeightedError(raw, &errorTenths, &activeCount);
-
-    /* 连续自适应：增益和速度随 |偏差| 平滑调节 */
-
-    /* ---- 横切线检测 ---- */
-    if (state == T1_TRACKING &&
-        LineTrace_DetectCrossLine(raw, activeCount, &crossLockout, &crossConfirm)
-        == CROSS_LINE_DETECTED) {
-        detectCount++; Set_Speed(0, 0); state = T1_STOPPED;
-        { uint32_t t=(uint32_t)(now-startTick);
-          char m[32]; (void)snprintf(m,sizeof(m),"T1: A! %lu.%lus\r\n",
-            (unsigned long)(t/1000U),(unsigned long)((t%1000U)/100U));
-          uart0_send_string(m); }
-    }
-
-    /* ---- 循迹修正 ---- */
-    if (state == T1_TRACKING) {
-        int16_t err = errorTenths;
-        static uint8_t lostCnt; float fe;
-
-        if (activeCount == 0U) {
-            lostCnt++;
-            err = (prevErr > 0.0f) ? (int16_t)(prevErr * 1.5f) : (int16_t)(prevErr * 1.5f);
-            if (lostCnt >= 60U) { Set_Speed(0, 0); state = T1_STOPPED; uart0_send_string("T1: LOST\r\n"); }
-        } else {
-            lostCnt = 0U;
-            if (err >= -3 && err <= 3) err = 0;
-            fe = (float)err;
-            fe = 0.6f * prevErr + 0.4f * fe;
-            prevErr = fe; err = (int16_t)fe;
-        }
-
-        /* 自校准 */
-        calFrame++;
-        if (calibCnt < 300U && calFrame > 20U && err >= -5 && err <= 5) { calibSum += (int32_t)err; calibCnt++; }
-        if (calibCnt > 0U) trimBias = (int16_t)((-calibSum * 3) / ((int32_t)calibCnt * 2));
-
-        /* 自适应：曲率 = 滤波后的 |偏差|，增益和速度随之变化 */
-        {
-            static float adaptLevel;
-            int16_t absErr = (err >= 0) ? err : (int16_t)(-err);
-            adaptLevel = 0.9f * adaptLevel + 0.1f * (float)absErr;
-
-            /* gain = 1.0 + level×0.3, speed = 600 - level×20, rate = 30 + level×3 */
-            int16_t ag = (int16_t)(10.0f + adaptLevel * 3.0f);   /* ×0.1, 范围 10~70 */
-            int16_t bp = (int16_t)(600.0f - adaptLevel * 20.0f); /* 范围 600~200 */
-            int16_t sm = (int16_t)(150.0f + adaptLevel * 10.0f); /* 范围 150~350 */
-            int16_t sr = (int16_t)(30.0f + adaptLevel * 3.0f);   /* 范围 30~90 */
-            if (ag < 10) ag = 10; if (ag > 70) ag = 70;
-            if (bp < 200) bp = 200; if (bp > 600) bp = 600;
-            if (sm < 150) sm = 150; if (sm > 350) sm = 350;
-            if (sr < 30) sr = 30; if (sr > 90) sr = 90;
-
-            int16_t corr = (int16_t)(((int32_t)err * ag) / 10) + trimBias;
-            if (corr > sm) corr = sm; if (corr < -sm) corr = -sm;
-
-            int16_t tl = (int16_t)(bp + corr), tr = (int16_t)(bp - corr), d;
-            if (tl < 0) tl = 0; if (tl > 1800) tl = 1800;
-            if (tr < 0) tr = 0; if (tr > 1800) tr = 1800;
-
-            d = (int16_t)(tl - sLeft); if (d > sr) sLeft += sr; else if (d < -sr) sLeft -= sr; else sLeft = tl;
-            d = (int16_t)(tr - sRight); if (d > sr) sRight += sr; else if (d < -sr) sRight -= sr; else sRight = tr;
-            Set_Speed((int)sLeft, (int)sRight);
-        }
-    }
-
-    if (state == T1_STOPPED) Set_Speed(0, 0);
-
-    /* ======== UART0 遥测(200ms周期) ======== */
-    {
-        static uint32_t telemTick;
-        if ((uint32_t)(now - telemTick) >= 200U) {
-            telemTick = now;
-            char m[100];
-            (void)snprintf(m, sizeof(m),
-                "T1|st=%u|raw=0x%02X|e=%d|a=%u|C=%d|T=%d|P=%d/%d|L=%d|R=%d\r\n",
-                (unsigned)state, (unsigned)raw, (int)errorTenths,
-                (unsigned)activeCount, 0, (int)trimBias,
-                (int)sLeft, (int)sRight,
-                (int)(crossLockout > 0U ? 1 : 0),
-                (int)(detectCount));
-            uart0_send_string(m);
-        }
-    }
-
-    /* ======== OLED 显示(仅状态) ======== */
-    OLED_ClearBuffer();
-    (void)snprintf(line, sizeof(line), "Task1 %s",
-                   state == T1_IDLE    ? "RIGHT->go" :
-                   state == T1_STOPPED ? "DONE"      : "RUN");
-    OLED_ShowString(0U, 0U, line, 16U, 1U);
-    (void)snprintf(line, sizeof(line), "%s",
-                   crossLockout > 0U ? "LOCK" : "");
-    OLED_ShowString(0U, 16U, line, 16U, 1U);
-    (void)snprintf(line, sizeof(line), "A:%lu T:%d",
-                   (unsigned long)detectCount, (int)trimBias);
-    OLED_ShowString(0U, 32U, line, 16U, 1U);
-    OLED_ShowString(0U, 48U, "UART0=params", 16U, 1U);
-    OLED_Refresh();
+    context->state = APP_LINE_LAP_IDLE;
+    context->startKeyArmed = 1U;
+    context->lastTick = 0U;
+    context->startTick = 0U;
+    LineTrace_ControllerReset(&context->controller);
+    LineTrace_ResetCrossDetect(&context->crossLockout,
+                               &context->crossConfirm);
 }
 
-/*
- * ================================================================
- *  Task 2 —— 曲线调试入口（自适应算法）
- *
- *  操作：菜单选中 Task 2 → 小车放到半圆端点 → 按F1启动
- *  行为：循迹前进，增益和速度随偏差自适应调节，丢线(全白)停车
- *
- *  自适应原理：
- *    偏差幅度 |e| 反映弯道曲率——直道小、弯道大
- *    filtered = 低通滤波(|e|) 得到平滑的曲率估计
- *    gain  = BASE + filtered × GAIN_SCALE   (自动适应曲率)
- *    speed = BASE - filtered × SPEED_SCALE  (弯道自动降速)
- *    所有参数在100帧内自动收敛，无需手动调。
- * ================================================================
- */
-void App_Task2Run(void)
+static void App_LineLapRun(App_LineLapContext *context,
+                           const LineTrace_ControlConfig *config,
+                           uint8_t taskNumber)
 {
-    enum { T2_IDLE, T2_TRACKING, T2_STOPPED };
-
     const uint32_t now = BSP_Delay_GetTick();
-    uint8_t  raw;
-    char     line[17];
+    const Key5D_Key stableKey = App_InputGetStableKey();
+    uint8_t raw;
+    uint8_t activeCount;
+    uint8_t hasLine;
+    int16_t errorTenths;
+    LineTrace_ControlOutput controlOutput;
 
-    static uint8_t  state = T2_IDLE;
-    static uint8_t  lastActive;
-    static uint32_t lastTick;
-    static uint32_t startTick;
-    static int16_t  sLeft  = 500;
-    static int16_t  sRight = 500;
-    static float    prevErr;       /* 偏差滤波 */
-    static float    curveLevel;    /* 曲率估计（平滑后的|偏差|） */
+    if (stableKey != KEY5D_KEY_RIGHT) {
+        context->startKeyArmed = 1U;
+    }
+    if ((context->state != APP_LINE_LAP_TRACKING) &&
+        (context->startKeyArmed != 0U) &&
+        (stableKey == KEY5D_KEY_RIGHT)) {
+        char message[20];
 
-    uint8_t  activeCount;
-    int16_t  errorTenths;
-
-    /* 菜单重入 */
-    if (lastActive != 2U) {
-        lastActive = 2U;
-        state    = T2_IDLE;
-        lastTick = 0U;
-        sLeft    = 500;
-        sRight   = 500;
-        prevErr    = 0.0f;
-        curveLevel = 0.0f;
+        context->startKeyArmed = 0U;
+        context->state = APP_LINE_LAP_TRACKING;
+        context->lastTick = now;
+        context->startTick = now;
+        LineTrace_ControllerReset(&context->controller);
+        LineTrace_ResetCrossDetect(&context->crossLockout,
+                                   &context->crossConfirm);
+        context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
         Set_Speed(0, 0);
+        (void)snprintf(message, sizeof(message), "T%u: START\r\n",
+                       (unsigned int)taskNumber);
+        uart0_send_string(message);
+        return;
     }
 
-    if ((uint32_t)(now - lastTick) < 20U) return;
-    lastTick = now;
+    if (context->state != APP_LINE_LAP_TRACKING) {
+        Set_Speed(0, 0);
+        return;
+    }
+    if ((uint32_t)(now - context->lastTick) <
+        APP_LINE_CONTROL_PERIOD_MS) {
+        return;
+    }
+    context->lastTick = now;
 
     Grayscale_Read();
     raw = Grayscale_GetRaw();
-    (void)LineTrace_CalcActiveLowWeightedError(raw, &errorTenths, &activeCount);
+    hasLine = LineTrace_CalcActiveLowWeightedError(
+        raw, &errorTenths, &activeCount);
 
-    switch (state) {
+    if (LineTrace_DetectCrossLine(raw, activeCount,
+                                  &context->crossLockout,
+                                  &context->crossConfirm)
+        == CROSS_LINE_DETECTED) {
+        uint32_t elapsed = (uint32_t)(now - context->startTick);
+        char message[40];
 
-    case T2_IDLE: {
-        uint8_t btn = (DL_GPIO_readPins(Key_PORT, Key_F1_PIN) == 0U) ? 1U : 0U;
-        static uint8_t db;
-        if (btn) {
-            if (++db >= 3U) {
-                db = 0U;
-                state = T2_TRACKING;
-                Encoder_Init();
-                sLeft  = 500;
-                sRight = 500;
-                prevErr    = 0.0f;
-                curveLevel = 0.0f;
-                startTick = now;
-                uart0_send_string("T2: CURVE START\r\n");
-            }
-        } else { db = 0U; }
         Set_Speed(0, 0);
-        break;
+        context->state = APP_LINE_LAP_STOPPED;
+        (void)snprintf(message, sizeof(message),
+                       "T%u: A %lu.%lus\r\n",
+                       (unsigned int)taskNumber,
+                       (unsigned long)(elapsed / 1000U),
+                       (unsigned long)((elapsed % 1000U) / 100U));
+        uart0_send_string(message);
+        return;
     }
 
-    case T2_TRACKING: {
-        /* 丢线(全白) → 停车 */
-        if (activeCount == 0U) {
-            Set_Speed(0, 0);
-            state = T2_STOPPED;
-            {
-                uint32_t t = (uint32_t)(now - startTick);
-                char m[32];
-                (void)snprintf(m, sizeof(m),
-                               "T2: DONE t=%lu.%lus\r\n",
-                               (unsigned long)(t / 1000U),
-                               (unsigned long)((t % 1000U) / 100U));
-                uart0_send_string(m);
-            }
-            break;
-        }
+    LineTrace_ControllerStep(&context->controller, config,
+                             hasLine, errorTenths, &controlOutput);
+    if (controlOutput.shouldStop != 0U) {
+        char message[20];
 
-        /* ---- 自适应算法 ---- */
-        {
-            int16_t err = errorTenths;
-            float   fe, absErr;
-            static uint8_t lostCnt;
-
-            /* 死区（微小偏差不动） */
-            if (err >= -2 && err <= 2) err = 0;
-
-            /* 偏差低通滤波（α=0.6） */
-            fe = (float)err;
-            fe = 0.6f * prevErr + 0.4f * fe;
-            prevErr = fe;
-            err = (int16_t)fe;
-
-            /* 曲率估计：低通滤波 |偏差|（α=0.95，缓慢变化） */
-            absErr = (float)(err >= 0 ? err : -err);
-            curveLevel = 0.95f * curveLevel + 0.05f * absErr;
-
-            /*
-             * 自适应参数（连续变化，无突变）：
-             *   gain = 1.0 + curveLevel × 0.4    → 范围约 1.0~5.0
-             *   speed = 500 - curveLevel × 25    → 范围约 500~200
-             *   rate = 30 + curveLevel × 5       → 范围约 30~80
-             */
-            #define T2_BASE_GAIN    (10)   /* P增益基数(×0.1) */
-            #define T2_GAIN_SCALE   (4)    /* 曲率→增益系数(×0.1) */
-            #define T2_BASE_PWM     (500)  /* 基准速度 */
-            #define T2_SPEED_SCALE  (25)   /* 曲率→减速系数 */
-            #define T2_BASE_RATE    (30)   /* 基准变速 */
-            #define T2_RATE_SCALE   (5)    /* 曲率→变速系数 */
-            #define T2_MAX_CORR     (250)  /* 最大修正 */
-
-            int16_t gain  = (int16_t)(T2_BASE_GAIN + (int16_t)(curveLevel * (float)T2_GAIN_SCALE));
-            int16_t bp    = (int16_t)(T2_BASE_PWM - (int16_t)(curveLevel * (float)T2_SPEED_SCALE));
-            int16_t rate  = (int16_t)(T2_BASE_RATE + (int16_t)(curveLevel * (float)T2_RATE_SCALE));
-
-            /* 限幅 */
-            if (gain < 10)  gain = 10;
-            if (gain > 60)  gain = 60;
-            if (bp   < 200) bp   = 200;
-            if (bp   > 500) bp   = 500;
-            if (rate < 20)  rate = 20;
-            if (rate > 100) rate = 100;
-
-            /* 比例修正 */
-            int16_t corr = (int16_t)(((int32_t)err * gain) / 10);
-            if (corr >  T2_MAX_CORR) corr =  T2_MAX_CORR;
-            if (corr < -T2_MAX_CORR) corr = -T2_MAX_CORR;
-
-            /* 目标PWM + 变化率整形 */
-            int16_t tl = (int16_t)(bp + corr);
-            int16_t tr = (int16_t)(bp - corr);
-            int16_t d;
-            if (tl < 0) tl = 0; if (tl > 1800) tl = 1800;
-            if (tr < 0) tr = 0; if (tr > 1800) tr = 1800;
-
-            d = (int16_t)(tl - sLeft);
-            if (d > rate) sLeft += rate; else if (d < -rate) sLeft -= rate; else sLeft = tl;
-            d = (int16_t)(tr - sRight);
-            if (d > rate) sRight += rate; else if (d < -rate) sRight -= rate; else sRight = tr;
-
-            Set_Speed((int)sLeft, (int)sRight);
-
-            #undef T2_BASE_GAIN
-            #undef T2_GAIN_SCALE
-            #undef T2_BASE_PWM
-            #undef T2_SPEED_SCALE
-            #undef T2_BASE_RATE
-            #undef T2_RATE_SCALE
-            #undef T2_MAX_CORR
-        }
-        break;
-    }
-
-    case T2_STOPPED:
         Set_Speed(0, 0);
-        break;
-
-    default:
-        break;
+        context->state = APP_LINE_LAP_STOPPED;
+        (void)snprintf(message, sizeof(message), "T%u: LOST\r\n",
+                       (unsigned int)taskNumber);
+        uart0_send_string(message);
+        return;
     }
 
-    /* OLED */
-    OLED_ClearBuffer();
-    (void)snprintf(line, sizeof(line), "%u%u%u%u%u%u%u%u",
-                   (unsigned)((raw>>7)&1),(unsigned)((raw>>6)&1),
-                   (unsigned)((raw>>5)&1),(unsigned)((raw>>4)&1),
-                   (unsigned)((raw>>3)&1),(unsigned)((raw>>2)&1),
-                   (unsigned)((raw>>1)&1),(unsigned)(raw&1));
-    OLED_ShowString(0U, 0U, line, 16U, 1U);
-    (void)snprintf(line, sizeof(line), "T2 %s",
-                   state==T2_IDLE?"F1->go":state==T2_STOPPED?"DONE":"RUN");
-    OLED_ShowString(0U, 16U, line, 16U, 1U);
-    (void)snprintf(line, sizeof(line), "Cv:%.0f G:%.1f",
-                   (double)curveLevel, (double)((float)(10+(int16_t)(curveLevel*4))/10.0f));
-    OLED_ShowString(0U, 32U, line, 16U, 1U);
-    (void)snprintf(line, sizeof(line), "P:%d %d/%d",
-                   (int)(500-(int16_t)(curveLevel*25)), (int)sLeft, (int)sRight);
-    OLED_ShowString(0U, 48U, line, 16U, 1U);
-    OLED_Refresh();
+    Set_Speed((int)controlOutput.leftPwm, (int)controlOutput.rightPwm);
+}
+
+/* Task 1：1100 PWM竞速档，单圈后在A停车。 */
+void App_Task1Run(void)
+{
+    App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U);
+}
+
+/* Task 2：加速前的600 PWM稳定档，巡线与停车逻辑同Task 1。 */
+void App_Task2Run(void)
+{
+    App_LineLapRun(&task2LineContext, &task2StableControlConfig, 2U);
 }
 
 /*
@@ -445,12 +243,12 @@ void App_Task3Run(void)
  *  Task 4 —— 题5：单圈循迹 + 经过A（不停车）
  *
  *  指标：≤30s，钢球稳定在摆杆中心 O（±1cm）
- *  循迹同 Task1 但速度更慢，检测到A后只记录时间不停车。
+ *  循迹使用 APP_BALL_LINE_CRUISE_PWM=600 稳定档，检测到A后只记录时间不停车。
  * ================================================================
  */
 void App_Task4Run(void)
 {
-    /* TODO: Task1 参数降速版，检测A后不停车 */
+    /* TODO: 使用 APP_BALL_LINE_CRUISE_PWM 稳定档，检测A后不停车。 */
 }
 
 /*
@@ -458,12 +256,12 @@ void App_Task4Run(void)
  *  Task 5 —— 题6：单圈循迹 + 经过A（不停车）+ 球任意位置
  *
  *  指标：≤30s，钢球稳定在摆杆任意指定位置（±1cm）
- *  循迹同 Task4，球控制区别于 Task4。
+ *  循迹同 Task4，保留 APP_BALL_LINE_CRUISE_PWM=600，球控制区别于 Task4。
  * ================================================================
  */
 void App_Task5Run(void)
 {
-    /* TODO: 循迹同 Task4，球控制由队友补充 */
+    /* TODO: 使用 APP_BALL_LINE_CRUISE_PWM 稳定档，球控制由队友补充。 */
 }
 
 /*
@@ -473,6 +271,15 @@ void App_Task5Run(void)
  */
 void App_TasksRun(void)
 {
+    static uint8_t previousTask;
+
+    if (g_active_task != previousTask) {
+        Set_Speed(0, 0);
+        App_LineLapReset(&task1LineContext);
+        App_LineLapReset(&task2LineContext);
+        previousTask = g_active_task;
+    }
+
     switch (g_active_task)
     {
     case 1U: App_Task1Run(); break;

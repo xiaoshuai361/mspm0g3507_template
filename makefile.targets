@@ -23,6 +23,12 @@
 	@echo 'Finished building: "$<"'
 	@echo ' '
 
+./App/app.o: ../App/app.c
+	@echo 'Arm Compiler - building file: "$<"'
+	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" -I"../App" -I"../BSP/ADC" -I"../BSP/Board" -I"../BSP/Delay" -I"../BSP/DL1A" -I"../BSP/DL1B" -I"../BSP/SoftI2C" -I"../BSP/Timer" -I"../BSP/UART" -I"../Module/Beep" -I"../Module/Bluetooth" -I"../Module/Encoder" -I"../Module/Grayscale" -I"../Module/IMU" -I"../Module/Key5D" -I"../Module/Keys" -I"../Module/LineTrace" -I"../Module/Menu" -I"../Module/Motor" -I"../Module/OLED" -I"../Module/PID" -I"../Module/ToF" -I"../tests" -I"../Debug" -I"D:/ti/mspm0_sdk_2_08_00_03/source/third_party/CMSIS/Core/Include" -I"D:/ti/mspm0_sdk_2_08_00_03/source" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"App/app.d_raw" -MT"$@" @"./device.opt" -o"$@" "$<"
+	@echo 'Finished building: "$<"'
+	@echo ' '
+
 ./App/app_vehicle.o: ../App/app_vehicle.c
 	@echo 'Arm Compiler - building file: "$<"'
 	"$(CG_TOOL_ROOT)/bin/tiarmclang.exe" -c @"device.opt" @"ccsIncludes.opt" -I"../Module/LineTrace" -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -gdwarf-3 -MMD -MP -MF"App/app_vehicle.d_raw" -MT"$@" @"./device.opt" -o"$@" "$<"

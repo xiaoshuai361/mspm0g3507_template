@@ -18,6 +18,13 @@ Listings/
 .settings/
 .syscfgmeta/
 
+# CCS debug probe configuration (machine-specific)
+targetConfigs/
+
+# clangd auto-generated (do not add to source-control)
+.clangd
+Debug/.clangd
+
 # Local caches and downloaded installers
 .headroom-cache/
 installers/
