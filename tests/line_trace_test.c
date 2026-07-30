@@ -55,40 +55,40 @@ static uint32_t LineTrace_ExpectLostLine(uint8_t raw)
 
 static const LineTrace_ControlConfig lineControlTestConfig = {
     .cruisePwm = 1100,
-    .lostPwm = 650,
+    .lostPwm = 700,
     .rampUpStep = 20,
     .rampDownStep = 35,
-    .curveSlowdownGain = 12,
-    .steeringKp = 3,
-    .edgeSteeringKp = 14,
-    .edgeSteeringThreshold = 8,
-    .steeringMax = 300,
+    .curveSlowdownGain = 8,
+    .steeringKp = 4,
+    .edgeSteeringKp = 20,
+    .edgeSteeringThreshold = 6,
+    .steeringMax = 420,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
-    .lostSearchStartError = 12,
-    .lostSearchStepFrames = 4U,
-    .lostHoldFrames = 3U,
-    .lostStopFrames = 120U,
+    .lostSearchStartError = 18,
+    .lostSearchStepFrames = 2U,
+    .lostHoldFrames = 1U,
+    .lostStopFrames = 150U,
 };
 
 static const LineTrace_ControlConfig lineControlStableTestConfig = {
     .cruisePwm = 600,
-    .lostPwm = 480,
+    .lostPwm = 500,
     .rampUpStep = 15,
-    .rampDownStep = 8,
+    .rampDownStep = 10,
     .curveSlowdownGain = 1,
-    .steeringKp = 3,
-    .edgeSteeringKp = 8,
-    .edgeSteeringThreshold = 8,
-    .steeringMax = 160,
+    .steeringKp = 4,
+    .edgeSteeringKp = 10,
+    .edgeSteeringThreshold = 6,
+    .steeringMax = 200,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
-    .lostSearchStartError = 12,
-    .lostSearchStepFrames = 4U,
-    .lostHoldFrames = 3U,
-    .lostStopFrames = 120U,
+    .lostSearchStartError = 16,
+    .lostSearchStepFrames = 3U,
+    .lostHoldFrames = 2U,
+    .lostStopFrames = 150U,
 };
 
 static uint32_t LineTrace_TestCrossLine(void)
@@ -181,26 +181,26 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                              1U, 15, &output);
     if ((output.filteredError != 11) ||
-        (output.correction != 18) ||
+        (output.correction != 120) ||
         (output.basePwm != 1065) ||
-        (output.leftPwm != 1083) || (output.rightPwm != 1047)) {
+        (output.leftPwm != 1185) || (output.rightPwm != 945)) {
         failures++;
     }
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                              1U, 15, &output);
     if ((output.filteredError != 14) ||
-        (output.correction != 126) ||
+        (output.correction != 180) ||
         (output.basePwm != 1030) ||
-        (output.leftPwm != 1156) || (output.rightPwm != 904)) {
+        (output.leftPwm != 1210) || (output.rightPwm != 850)) {
         failures++;
     }
     for (frame = 0U; frame < 3U; frame++) {
         LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                                  1U, 15, &output);
     }
-    if ((output.basePwm != 932) ||
-        (output.correction != 126) ||
-        (output.leftPwm != 1058) || (output.rightPwm != 806)) {
+    if ((output.basePwm != 988) ||
+        (output.correction != 180) ||
+        (output.leftPwm != 1168) || (output.rightPwm != 808)) {
         failures++;
     }
 
@@ -208,8 +208,8 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              1U, 35, &output);
     if ((output.filteredError != 26) ||
-        (output.correction != 294) ||
-        (output.leftPwm != 1359) || (output.rightPwm != 771)) {
+        (output.correction != 420) ||
+        (output.leftPwm != 1485) || (output.rightPwm != 645)) {
         failures++;
     }
 
@@ -217,13 +217,27 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              1U, -35, &output);
     if ((output.filteredError != -19) ||
-        (output.correction != -196) ||
-        (output.leftPwm != 834) || (output.rightPwm != 1226)) {
+        (output.correction != -280) ||
+        (output.leftPwm != 750) || (output.rightPwm != 1310)) {
         failures++;
     }
 
-    /* 119帧内保持有界搜索，第120帧才报告持续丢线停车。 */
-    for (frame = 0U; frame < 119U; frame++) {
+    /* 首帧短暂保持，第二帧立即进入强力定向搜索。 */
+    LineTrace_ControllerStep(&controller, &lineControlTestConfig,
+                             0U, 0, &output);
+    if ((output.shouldStop != 0U) ||
+        (output.leftPwm != 715) || (output.rightPwm != 1275)) {
+        failures++;
+    }
+    LineTrace_ControllerStep(&controller, &lineControlTestConfig,
+                             0U, 0, &output);
+    if ((output.shouldStop != 0U) ||
+        (output.leftPwm != 600) || (output.rightPwm != 1320)) {
+        failures++;
+    }
+
+    /* 149帧内保持正转搜索，第150帧才报告持续丢线停车。 */
+    for (frame = 2U; frame < 149U; frame++) {
         LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                                  0U, 0, &output);
         if ((output.shouldStop != 0U) ||
@@ -231,6 +245,11 @@ static uint32_t LineTrace_TestController(void)
             failures++;
             break;
         }
+    }
+    if ((output.basePwm != 700) ||
+        (output.correction != -280) ||
+        (output.leftPwm != 420) || (output.rightPwm != 980)) {
+        failures++;
     }
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              0U, 0, &output);
@@ -264,8 +283,8 @@ static uint32_t LineTrace_TestStableController(void)
                              1U, 15, &output);
     if ((output.filteredError != 14) ||
         (output.basePwm != 586) ||
-        (output.correction != 72) ||
-        (output.leftPwm != 658) || (output.rightPwm != 514)) {
+        (output.correction != 90) ||
+        (output.leftPwm != 676) || (output.rightPwm != 496)) {
         failures++;
     }
 

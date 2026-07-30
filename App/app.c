@@ -55,6 +55,7 @@ static void App_LogSelfTests(void)
 enum {
     APP_LINE_LAP_IDLE,
     APP_LINE_LAP_TRACKING,
+    APP_LINE_LAP_BRAKING,
     APP_LINE_LAP_STOPPED
 };
 
@@ -68,47 +69,53 @@ typedef struct {
     uint8_t startKeyArmed;
     uint32_t lastTick;
     uint32_t startTick;
+    uint32_t brakeStartTick;
     uint16_t crossLockout;
     uint8_t crossConfirm;
     LineTrace_Controller controller;
 } App_LineLapContext;
 
+/*
+ * Task 1 调参顺序：半圆转不动先增 edgeSteeringKp，再减
+ * edgeSteeringThreshold，最后才增 steeringMax；直线摆动则反向调整。
+ * 所有“帧”均为10ms，误差单位为0.1个灰度探头间距。
+ */
 static const LineTrace_ControlConfig task1FastControlConfig = {
-    .cruisePwm = APP_TASK1_LINE_CRUISE_PWM,
-    .lostPwm = 650,
-    .rampUpStep = 20,
-    .rampDownStep = 35,
-    .curveSlowdownGain = 12,
-    .steeringKp = 3,
-    .edgeSteeringKp = 14,
-    .edgeSteeringThreshold = 8,
-    .steeringMax = 300,
-    .centerDeadband = 5,
-    .fastErrorThreshold = 15,
-    .fastDeltaThreshold = 12,
-    .lostSearchStartError = 12,
-    .lostSearchStepFrames = 4U,
-    .lostHoldFrames = 3U,
-    .lostStopFrames = 120U,
+    .cruisePwm = APP_TASK1_LINE_CRUISE_PWM, /* 直线巡航PWM，在app_config.h中修改。 */
+    .lostPwm = 700,              /* 弯道重度降速/丢线搜索下限；增大可补偿配重，但更难找回线。 */
+    .rampUpStep = 20,            /* 每帧基准PWM上升量；增大则起步和出弯加速更快。 */
+    .rampDownStep = 35,          /* 每帧基准PWM下降量；增大则入弯减速更快，但速度变化更突兀。 */
+    .curveSlowdownGain = 8,      /* 每单位绝对偏差扣除的PWM；增大可降低弯速。 */
+    .steeringKp = 4,             /* 小偏差比例增益；增大可加快微调，过大会造成直线摆动。 */
+    .edgeSteeringKp = 20,        /* 中/大偏差增益；半圆转向不足时优先增大此值。 */
+    .edgeSteeringThreshold = 6,  /* 死区后偏差达到此值启用强增益；减小会更早强纠偏。 */
+    .steeringMax = 420,          /* 差速修正硬上限；实际还受当前基准PWM的40%限制。 */
+    .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
+    .fastErrorThreshold = 15,    /* 原始偏差达到此值使用3/4新值快滤波；减小响应更快。 */
+    .fastDeltaThreshold = 12,    /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
+    .lostSearchStartError = 18,  /* 丢线搜索的初始等效偏差；增大则首次找线转向更强。 */
+    .lostSearchStepFrames = 2U,  /* 搜索偏差每隔多少帧加1；减小会更快增强搜索。 */
+    .lostHoldFrames = 1U,        /* 丢线后保持最后纠偏的帧数；当前1帧即10ms。 */
+    .lostStopFrames = 150U,      /* 连续丢线停车时间；当前150帧即1.5s。 */
 };
 
 static const LineTrace_ControlConfig task2StableControlConfig = {
     .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
-    .lostPwm = 480,
+    .lostPwm = 500,
     .rampUpStep = 15,
-    .rampDownStep = 8,
+    .rampDownStep = 10,
     .curveSlowdownGain = 1,
-    .steeringKp = 3,
-    .edgeSteeringKp = 8,
-    .edgeSteeringThreshold = 8,
-    .steeringMax = 160,
+    .steeringKp = 4,
+    .edgeSteeringKp = 12,
+    .edgeSteeringThreshold = 6,
+    .steeringMax = 200,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
-    .lostSearchStartError = 12,
-    .lostSearchStepFrames = 4U,
-    .lostHoldFrames = 3U,
-    .lostStopFrames = 120U,
+    .lostSearchStartError = 16,
+    .lostSearchStepFrames = 3U,
+    .lostHoldFrames = 2U,
+    .lostStopFrames = 150U,
 };
 
 static App_LineLapContext task1LineContext = {
@@ -124,6 +131,7 @@ static void App_LineLapReset(App_LineLapContext *context)
     context->startKeyArmed = 1U;
     context->lastTick = 0U;
     context->startTick = 0U;
+    context->brakeStartTick = 0U;
     LineTrace_ControllerReset(&context->controller);
     LineTrace_ResetCrossDetect(&context->crossLockout,
                                &context->crossConfirm);
@@ -131,7 +139,8 @@ static void App_LineLapReset(App_LineLapContext *context)
 
 static void App_LineLapRun(App_LineLapContext *context,
                            const LineTrace_ControlConfig *config,
-                           uint8_t taskNumber)
+                           uint8_t taskNumber, int16_t brakePwm,
+                           uint16_t brakeDurationMs)
 {
     const uint32_t now = BSP_Delay_GetTick();
     const Key5D_Key stableKey = App_InputGetStableKey();
@@ -143,6 +152,16 @@ static void App_LineLapRun(App_LineLapContext *context,
 
     if (stableKey != KEY5D_KEY_RIGHT) {
         context->startKeyArmed = 1U;
+    }
+    if (context->state == APP_LINE_LAP_BRAKING) {
+        if ((uint32_t)(now - context->brakeStartTick) <
+            brakeDurationMs) {
+            Set_Speed((int)-brakePwm, (int)-brakePwm);
+        } else {
+            Set_Speed(0, 0);
+            context->state = APP_LINE_LAP_STOPPED;
+        }
+        return;
     }
     if ((context->state != APP_LINE_LAP_TRACKING) &&
         (context->startKeyArmed != 0U) &&
@@ -186,8 +205,14 @@ static void App_LineLapRun(App_LineLapContext *context,
         uint32_t elapsed = (uint32_t)(now - context->startTick);
         char message[40];
 
-        Set_Speed(0, 0);
-        context->state = APP_LINE_LAP_STOPPED;
+        if ((brakePwm > 0) && (brakeDurationMs > 0U)) {
+            context->state = APP_LINE_LAP_BRAKING;
+            context->brakeStartTick = now;
+            Set_Speed((int)-brakePwm, (int)-brakePwm);
+        } else {
+            Set_Speed(0, 0);
+            context->state = APP_LINE_LAP_STOPPED;
+        }
         (void)snprintf(message, sizeof(message),
                        "T%u: A %lu.%lus\r\n",
                        (unsigned int)taskNumber,
@@ -216,13 +241,15 @@ static void App_LineLapRun(App_LineLapContext *context,
 /* Task 1：1100 PWM竞速档，单圈后在A停车。 */
 void App_Task1Run(void)
 {
-    App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U);
+    App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U,
+                   APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS);
 }
 
 /* Task 2：加速前的600 PWM稳定档，巡线与停车逻辑同Task 1。 */
 void App_Task2Run(void)
 {
-    App_LineLapRun(&task2LineContext, &task2StableControlConfig, 2U);
+    App_LineLapRun(&task2LineContext, &task2StableControlConfig, 2U,
+                   0, 0U);
 }
 
 /*

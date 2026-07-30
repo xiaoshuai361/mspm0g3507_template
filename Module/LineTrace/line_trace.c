@@ -249,9 +249,9 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
     correction = (int16_t)(steeringError * steeringGain);
     correctionLimit = config->steeringMax;
 
-    /* 起步阶段限制转向占比，防止低速时一侧电机被压到静摩擦区。 */
-    if ((controller->basePwm / 3) < correctionLimit) {
-        correctionLimit = (int16_t)(controller->basePwm / 3);
+    /* 两轮保持正转，同时允许配重增加后使用更强的40%差速纠偏。 */
+    if (((controller->basePwm * 2) / 5) < correctionLimit) {
+        correctionLimit = (int16_t)((controller->basePwm * 2) / 5);
     }
     if (correction > correctionLimit) {
         correction = correctionLimit;
