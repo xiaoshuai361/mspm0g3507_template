@@ -70,9 +70,6 @@ void App_VehicleClosedLoopDisable(void);
 /* 退出速度闭环、清空 PID 状态并立即停车。 */
 void App_VehicleClosedLoopStop(void);
 
-/* 查询速度闭环是否正在运行；空闲菜单允许 VOFA S 命令保持台架整定目标。 */
-bool App_VehicleClosedLoopIsEnabled(void);
-
 /* 获取左右轮闭环目标的平均值，供低频菜单刷新使用。 */
 float App_VehicleClosedLoopGetAverageTarget(void);
 

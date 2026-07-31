@@ -8,9 +8,13 @@
 #define LINE_TRACE_BIT_GO_LEFT_1  (5U) /**< LINE_TRACE_BIT_GO_LEFT_1 模块配置或状态宏。 */
 #define LINE_TRACE_BIT_GO_LEFT_2  (6U) /**< LINE_TRACE_BIT_GO_LEFT_2 模块配置或状态宏。 */
 #define LINE_TRACE_BIT_TURN_LEFT  (7U) /**< LINE_TRACE_BIT_TURN_LEFT 模块配置或状态宏。 */
+#define LINE_TRACE_OUTER_RIGHT_MASK ((uint8_t)(1U << LINE_TRACE_BIT_TURN_RIGHT))
+#define LINE_TRACE_OUTER_LEFT_MASK  ((uint8_t)(1U << LINE_TRACE_BIT_TURN_LEFT))
+#define LINE_TRACE_OUTER_MASK ((uint8_t)(LINE_TRACE_OUTER_RIGHT_MASK | \
+                                         LINE_TRACE_OUTER_LEFT_MASK))
 
 static const int16_t lineTraceWeightsTenths[8] = {
-    35, 25, 15, 5, -5, -15, -25, -35
+    28, 25, 15, 5, -5, -15, -25, -28
 }; /**< bit0~bit7 的位置权重，单位 0.1 路间距；右正左负。 */
 
 /**
@@ -113,6 +117,85 @@ uint8_t LineTrace_CalcWeightedError(uint8_t raw, int16_t *errorTenths, uint8_t *
 uint8_t LineTrace_CalcActiveLowWeightedError(uint8_t raw, int16_t *errorTenths, uint8_t *activeCount)
 {
     return LineTrace_CalcWeightedError((uint8_t)~raw, errorTenths, activeCount);
+}
+
+uint8_t LineTrace_CountActiveLow(uint8_t raw)
+{
+    uint8_t active = (uint8_t)~raw;
+    uint8_t count = 0U;
+
+    while (active != 0U) {
+        count = (uint8_t)(count + (active & 0x01U));
+        active >>= 1U;
+    }
+
+    return count;
+}
+
+void LineTrace_OuterFilterReset(LineTrace_OuterFilter *filter)
+{
+    if (filter == 0) {
+        return;
+    }
+
+    filter->initialized = 0U;
+    filter->filteredOuterBits = LINE_TRACE_OUTER_MASK;
+    filter->rightMismatchFrames = 0U;
+    filter->leftMismatchFrames = 0U;
+}
+
+static void LineTrace_FilterOuterBit(uint8_t raw, uint8_t mask,
+                                     uint8_t stableFrames,
+                                     uint8_t *filteredBits,
+                                     uint8_t *mismatchFrames)
+{
+    const uint8_t rawLevel = (uint8_t)(raw & mask);
+    const uint8_t filteredLevel = (uint8_t)(*filteredBits & mask);
+
+    if ((rawLevel == 0U) == (filteredLevel == 0U)) {
+        *mismatchFrames = 0U;
+        return;
+    }
+
+    if (*mismatchFrames < stableFrames) {
+        (*mismatchFrames)++;
+    }
+    if (*mismatchFrames < stableFrames) {
+        return;
+    }
+
+    if (rawLevel != 0U) {
+        *filteredBits = (uint8_t)(*filteredBits | mask);
+    } else {
+        *filteredBits = (uint8_t)(*filteredBits & (uint8_t)~mask);
+    }
+    *mismatchFrames = 0U;
+}
+
+uint8_t LineTrace_FilterActiveLowOuterChannels(
+    LineTrace_OuterFilter *filter, uint8_t raw, uint8_t stableFrames)
+{
+    if ((filter == 0) || (stableFrames <= 1U)) {
+        return raw;
+    }
+
+    if (filter->initialized == 0U) {
+        filter->initialized = 1U;
+        filter->filteredOuterBits = (uint8_t)(raw & LINE_TRACE_OUTER_MASK);
+        filter->rightMismatchFrames = 0U;
+        filter->leftMismatchFrames = 0U;
+        return raw;
+    }
+
+    LineTrace_FilterOuterBit(raw, LINE_TRACE_OUTER_RIGHT_MASK,
+                             stableFrames, &filter->filteredOuterBits,
+                             &filter->rightMismatchFrames);
+    LineTrace_FilterOuterBit(raw, LINE_TRACE_OUTER_LEFT_MASK,
+                             stableFrames, &filter->filteredOuterBits,
+                             &filter->leftMismatchFrames);
+
+    return (uint8_t)((raw & (uint8_t)~LINE_TRACE_OUTER_MASK) |
+                     filter->filteredOuterBits);
 }
 
 static int16_t LineTrace_AbsInt16(int16_t value)

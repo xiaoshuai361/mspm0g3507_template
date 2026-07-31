@@ -62,6 +62,13 @@ typedef struct {
     uint8_t shouldStop;
 } LineTrace_ControlOutput;
 
+typedef struct {
+    uint8_t initialized;
+    uint8_t filteredOuterBits;
+    uint8_t rightMismatchFrames;
+    uint8_t leftMismatchFrames;
+} LineTrace_OuterFilter;
+
 LineTrace_State LineTrace_DecodeState(uint8_t raw);
 LineTrace_State LineTrace_DecodeActiveLowRaw(uint8_t raw);
 uint8_t LineTrace_CalcWeightedError(uint8_t raw, int16_t *errorTenths,
@@ -69,6 +76,10 @@ uint8_t LineTrace_CalcWeightedError(uint8_t raw, int16_t *errorTenths,
 uint8_t LineTrace_CalcActiveLowWeightedError(uint8_t raw,
                                              int16_t *errorTenths,
                                              uint8_t *activeCount);
+uint8_t LineTrace_CountActiveLow(uint8_t raw);
+void LineTrace_OuterFilterReset(LineTrace_OuterFilter *filter);
+uint8_t LineTrace_FilterActiveLowOuterChannels(
+    LineTrace_OuterFilter *filter, uint8_t raw, uint8_t stableFrames);
 const char *LineTrace_StateName(LineTrace_State state);
 
 void LineTrace_ControllerReset(LineTrace_Controller *controller);

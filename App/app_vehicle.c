@@ -28,12 +28,12 @@ static uint32_t lastLineTick;                           /**< 上一次灰度循�
 static uint32_t lastSpeedTick;                          /**< 上一次编码器测速时间戳。 */
 static uint32_t lastControlTick;                        /**< 上一次 PID 闭环输出时间戳。 */
 static uint32_t lastDebugTick;                          /**< 上一次车辆调试信息输出时间戳。 */
-static uint32_t lastVofaTick;                           /**< 上一次 VOFA JustFloat 数据帧时间戳。 */
+static LineTrace_OuterFilter vehicleLineOuterFilter;    /**< 通用循迹路径的D1/D8数字滤波状态。 */
 
 static PID_t leftSpeedPid = {
     /**< 左轮速度闭环 PID 参数和运行状态。 */
     .Target = 0.0f,
-    .Kp = 10.0f,
+    .Kp = 11.5f,
     .Ki = 0.3f,
     .Kd = 0.1f,
     .OutMax = APP_VEHICLE_PID_OUT_MAX,
@@ -55,8 +55,7 @@ static PID_t rightSpeedPid = {
 };
 
 enum {
-    APP_VOFA_COMMAND_SIZE = 32U,
-    APP_VOFA_CHANNEL_COUNT = 6U
+    APP_VOFA_COMMAND_SIZE = 32U
 };
 
 /**
@@ -267,25 +266,6 @@ static void App_VehicleVofaReceiveRun(void)
     }
 }
 
-static void App_VehicleVofaTransmitRun(uint32_t now)
-{
-    float data[APP_VOFA_CHANNEL_COUNT];
-
-    if ((uint32_t)(now - lastVofaTick) < APP_VOFA_TELEMETRY_PERIOD_MS)
-    {
-        return;
-    }
-    lastVofaTick = now;
-
-    data[0] = Motor1_Speed;
-    data[1] = Motor2_Speed;
-    data[2] = leftSpeedPid.Target;
-    data[3] = rightSpeedPid.Target;
-    data[4] = leftSpeedPid.Out;
-    data[5] = rightSpeedPid.Out;
-    (void)vofa_justfloat_send(data, APP_VOFA_CHANNEL_COUNT);
-}
-
 /**
  * @brief 设置左右轮速度闭环目标值。
  * @param leftTarget 左轮目标速度。
@@ -323,11 +303,6 @@ float App_VehicleClosedLoopGetAverageTarget(void)
     return (leftSpeedPid.Target + rightSpeedPid.Target) * 0.5f;
 }
 
-bool App_VehicleClosedLoopIsEnabled(void)
-{
-    return speedLoopEnabled;
-}
-
 /**
  * @brief 初始化蓝牙、编码器和车辆控制状态。
  * @param 无。
@@ -347,6 +322,7 @@ void App_VehicleInit(void)
     Encoder_Init();
     uart0_send_string("Vehicle encoder OK\r\n");
     App_VehicleClosedLoopStop();
+    LineTrace_OuterFilterReset(&vehicleLineOuterFilter);
     App_VehiclePublishPidParameters();
 
     vehicleInitialized = true;
@@ -481,6 +457,7 @@ void App_LineTraceRun(void)
     int16_t errorTenths = 0;
     uint8_t activeCount = 0U;
     uint8_t hasLine;
+    uint8_t steeringRaw;
 
     if ((uint32_t)(now - lastLineTick) < APP_VEHICLE_LINE_PERIOD_MS)
     {
@@ -491,7 +468,12 @@ void App_LineTraceRun(void)
     Grayscale_Read();
     g_vehicle_line_raw = Grayscale_GetRaw();
     state = LineTrace_DecodeActiveLowRaw(g_vehicle_line_raw);
-    hasLine = LineTrace_CalcActiveLowWeightedError(g_vehicle_line_raw, &errorTenths, &activeCount);
+    steeringRaw = LineTrace_FilterActiveLowOuterChannels(
+        &vehicleLineOuterFilter, g_vehicle_line_raw,
+        APP_LINE_OUTER_FILTER_FRAMES);
+    hasLine = LineTrace_CalcActiveLowWeightedError(
+        steeringRaw, &errorTenths, 0);
+    activeCount = LineTrace_CountActiveLow(g_vehicle_line_raw);
     g_vehicle_line_state = (uint8_t)state;
     g_vehicle_line_error_tenths = errorTenths;
     g_vehicle_line_active_count = activeCount;
@@ -540,8 +522,6 @@ void App_VehicleControlRun(void)
         PID_Update(&rightSpeedPid);
         Set_Speed((int)(leftSpeedPid.Out), (int)(rightSpeedPid.Out));
     }
-
-    App_VehicleVofaTransmitRun(now);
 }
 
 /**

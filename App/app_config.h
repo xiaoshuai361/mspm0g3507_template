@@ -28,19 +28,17 @@
 #define APP_TASK1_LINE_CRUISE_PWM (1100) /**< 题2单圈循迹直道竞速 PWM。 */
 #define APP_STABLE_LINE_CRUISE_PWM (702) /**< Task 2及低速负载任务的稳定巡航 PWM。 */
 #define APP_BALL_LINE_CRUISE_PWM APP_STABLE_LINE_CRUISE_PWM /**< 题5/6钢球稳定任务速度。 */
-#define APP_TASK1_BRAKE_PWM (950)          /**< Task 1停车线触发后的反向制动 PWM。 */
-#define APP_TASK1_BRAKE_DURATION_MS (170U) /**< Task 1反向制动持续时间。 */
+#define APP_TASK1_BRAKE_PWM (1000)          /**< Task 1停车线触发后的反向制动 PWM。 */
+#define APP_TASK1_BRAKE_DURATION_MS (190U) /**< Task 1反向制动持续时间。 */
+#define APP_TASK1_BRAKE_DELAY_PULSES (0U)  /**< 检测停车线后继续前进的左右编码器绝对增量之和；0=立即制动。 */
 
-/* PID 连续循迹整定模式：0=忽略横线、距离和丢线自动停车，1=恢复比赛停车。 */
-#define APP_LINE_AUTO_STOP_ENABLED (0U)
-
-#define APP_VEHICLE_DEFAULT_SPEED (150.0f)   /**< 车辆默认目标速度。 */
+#define APP_VEHICLE_DEFAULT_SPEED (150.0f)  /**< f62ded5 整定后的车辆默认目标速度。 */
 #define APP_VEHICLE_LINE_PERIOD_MS (10U)    /**< 灰度循迹读取周期，单位 ms；灰度读取轻，保留快速响应。 */
+#define APP_LINE_OUTER_FILTER_FRAMES (1U)   /**< D1/D8最外侧灰度连续稳定帧数；1=不滤波，3约为30ms。 */
 #define APP_VEHICLE_SPEED_PERIOD_MS (20U)   /**< 编码器测速周期，单位 ms；降低抖动和 CPU 占用。 */
 #define APP_VEHICLE_CONTROL_PERIOD_MS (20U) /**< 速度 PID 控制周期，单位 ms；50Hz 控制兼顾响应和负载。 */
 #define APP_VEHICLE_DEBUG_PERIOD_MS (1000U) /**< 车辆状态串口调试输出周期，单位 ms。 */
 
-#define APP_VOFA_TELEMETRY_PERIOD_MS (20U) /**< VOFA JustFloat 上传周期，和测速/PID 同步为 50Hz。 */
 #define APP_VOFA_PID_GAIN_MAX (200.0f)      /**< VOFA 在线设置 Kp/Ki/Kd 的安全上限。 */
 #define APP_VOFA_SPEED_MAX (120.0f)         /**< VOFA S 命令允许的最大前进目标速度。 */
 

@@ -152,6 +152,66 @@ static uint32_t LineTrace_TestCrossLine(void)
     return failures;
 }
 
+static uint32_t LineTrace_TestOuterFilter(void)
+{
+    uint32_t failures = 0U;
+    LineTrace_OuterFilter filter;
+
+    LineTrace_OuterFilterReset(&filter);
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFFU, 3U)
+        != 0xFFU) {
+        failures++;
+    }
+
+    /* Inner six channels pass through immediately. */
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFBU, 3U)
+        != 0xFBU) {
+        failures++;
+    }
+
+    /* D1 must remain active for three frames before steering sees it. */
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFEU, 3U)
+        != 0xFFU) {
+        failures++;
+    }
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFEU, 3U)
+        != 0xFFU) {
+        failures++;
+    }
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFEU, 3U)
+        != 0xFEU) {
+        failures++;
+    }
+
+    /* Release uses the same confirmation window to prevent edge chatter. */
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFFU, 3U)
+        != 0xFEU) {
+        failures++;
+    }
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFFU, 3U)
+        != 0xFEU) {
+        failures++;
+    }
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0xFFU, 3U)
+        != 0xFFU) {
+        failures++;
+    }
+
+    /* A one-frame setting explicitly bypasses the filter. */
+    if (LineTrace_FilterActiveLowOuterChannels(&filter, 0x7FU, 1U)
+        != 0x7FU) {
+        failures++;
+    }
+
+    if ((LineTrace_CountActiveLow(0xFFU) != 0U) ||
+        (LineTrace_CountActiveLow(0xE7U) != 2U) ||
+        (LineTrace_CountActiveLow(0x00U) != 8U)) {
+        failures++;
+    }
+
+    return failures;
+}
+
 static uint32_t LineTrace_TestController(void)
 {
     uint32_t failures = 0U;
@@ -360,6 +420,7 @@ uint32_t LineTrace_RunSelfTest(void)
     failures += LineTrace_ExpectActiveLowWeightedError(0xE7U, 0, 2U);
     failures += LineTrace_ExpectActiveLowWeightedError(0xFCU, 30, 2U);
     failures += LineTrace_ExpectActiveLowWeightedError(0x3FU, -30, 2U);
+    failures += LineTrace_TestOuterFilter();
     failures += LineTrace_TestCrossLine();
     failures += LineTrace_TestController();
     failures += LineTrace_TestStableController();

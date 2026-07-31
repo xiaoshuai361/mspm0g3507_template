@@ -132,7 +132,7 @@ void uart0_init(void)
     DL_UART_Main_disableInterrupt(UART_0_INST, DL_UART_MAIN_INTERRUPT_TX);
     NVIC_ClearPendingIRQ(UART_0_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
-    uart0_send_string("VOFA+ Ready\r\n");
+    uart0_send_string("UART0 Ready\r\n");
 }
 
 /**

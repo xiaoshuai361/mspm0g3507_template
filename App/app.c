@@ -69,6 +69,7 @@ typedef struct {
     uint8_t state;
     uint8_t startKeyArmed;
     uint8_t stopOnDist;        /* 1=编码器距离停车(Task3) */
+    uint8_t brakePending;      /* 1=已检测停车线，等待到达设定制动位置 */
     uint32_t lastTick;
     uint32_t startTick;
     uint32_t brakeStartTick;
@@ -76,6 +77,9 @@ typedef struct {
     uint8_t crossConfirm;
     int32_t startEncL;         /* 启动时左编码器累计值 */
     int32_t startEncR;         /* 启动时右编码器累计值 */
+    int32_t brakeDetectEncL;   /* 检测到停车线时的左编码器累计值 */
+    int32_t brakeDetectEncR;   /* 检测到停车线时的右编码器累计值 */
+    LineTrace_OuterFilter outerFilter;
     LineTrace_Controller controller;
 } App_LineLapContext;
 
@@ -97,7 +101,7 @@ static const LineTrace_ControlConfig task1FastControlConfig = {
     .edgeSteeringKp = 20,        /* 提高右半圆持续转向力。 */
     .edgeSteeringThreshold = 6,  /* 死区后偏差达到此值启用强增益；减小会更早强纠偏。 */
     .steeringMax = 480,          /* 放宽高速档差速修正硬上限。 */
-    .steeringSlewStep = 60,      /* 每10ms差速最多变化80，避免阈值跳变时瞬间反打。 */
+    .steeringSlewStep = 60,      /* 每10ms差速最多变化60，避免阈值跳变时瞬间反打。 */
     .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
     .rightTurnBoost = 135,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
     .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
@@ -163,6 +167,10 @@ static void App_LineLapReset(App_LineLapContext *context)
     context->lastTick = 0U;
     context->startTick = 0U;
     context->brakeStartTick = 0U;
+    context->brakePending = 0U;
+    context->brakeDetectEncL = 0;
+    context->brakeDetectEncR = 0;
+    LineTrace_OuterFilterReset(&context->outerFilter);
     LineTrace_ControllerReset(&context->controller);
     LineTrace_ResetCrossDetect(&context->crossLockout,
                                &context->crossConfirm);
@@ -188,14 +196,22 @@ static void App_LineApplyClosedLoopTarget(
         App_LinePwmToSpeedTarget(rightEquivalentPwm));
 }
 
+static void App_LineApplyBrake(int16_t brakePwm)
+{
+    App_VehicleClosedLoopDisable();
+    Set_Speed((int)-brakePwm, (int)-brakePwm);
+}
+
 static void App_LineLapRun(App_LineLapContext *context,
                            const LineTrace_ControlConfig *config,
                            uint8_t taskNumber, int16_t brakePwm,
-                           uint16_t brakeDurationMs)
+                           uint16_t brakeDurationMs,
+                           uint32_t brakeDelayPulses)
 {
     const uint32_t now = BSP_Delay_GetTick();
     const Key5D_Key stableKey = App_InputGetStableKey();
     uint8_t raw;
+    uint8_t steeringRaw;
     uint8_t activeCount;
     uint8_t hasLine;
     int16_t errorTenths;
@@ -207,7 +223,7 @@ static void App_LineLapRun(App_LineLapContext *context,
     if (context->state == APP_LINE_LAP_BRAKING) {
         if ((uint32_t)(now - context->brakeStartTick) <
             brakeDurationMs) {
-            Set_Speed((int)-brakePwm, (int)-brakePwm);
+            App_LineApplyBrake(brakePwm);
         } else {
             App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
@@ -229,6 +245,10 @@ static void App_LineLapRun(App_LineLapContext *context,
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
         context->startEncL = Encoder_CumulativeL;
         context->startEncR = Encoder_CumulativeR;
+        context->brakePending = 0U;
+        context->brakeDetectEncL = 0;
+        context->brakeDetectEncR = 0;
+        LineTrace_OuterFilterReset(&context->outerFilter);
         App_VehicleClosedLoopStop();
         App_MenuForceTimerPage();
         Menu_SetTaskTime(0U);
@@ -248,6 +268,21 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
     context->lastTick = now;
 
+    if (context->brakePending != 0U) {
+        int32_t dL = Encoder_CumulativeL - context->brakeDetectEncL;
+        int32_t dR = Encoder_CumulativeR - context->brakeDetectEncR;
+        uint32_t distance = (uint32_t)((dL >= 0 ? dL : -dL) +
+                                       (dR >= 0 ? dR : -dR));
+
+        if (distance >= brakeDelayPulses) {
+            context->brakePending = 0U;
+            context->state = APP_LINE_LAP_BRAKING;
+            context->brakeStartTick = now;
+            App_LineApplyBrake(brakePwm);
+            return;
+        }
+    }
+
     /* 每秒更新计时显示 */
     {   static uint16_t lastReportedSec;
         uint16_t sec = (uint16_t)((now - context->startTick) / 1000U);
@@ -259,10 +294,13 @@ static void App_LineLapRun(App_LineLapContext *context,
 
     Grayscale_Read();
     raw = Grayscale_GetRaw();
+    steeringRaw = LineTrace_FilterActiveLowOuterChannels(
+        &context->outerFilter, raw, APP_LINE_OUTER_FILTER_FRAMES);
     hasLine = LineTrace_CalcActiveLowWeightedError(
-        raw, &errorTenths, &activeCount);
+        steeringRaw, &errorTenths, 0);
+    activeCount = LineTrace_CountActiveLow(raw);
 
-    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
+    if ((context->brakePending == 0U) &&
         (LineTrace_DetectCrossLine(raw, activeCount,
                                   &context->crossLockout,
                                   &context->crossConfirm)
@@ -271,10 +309,15 @@ static void App_LineLapRun(App_LineLapContext *context,
         char message[40];
 
         if ((brakePwm > 0) && (brakeDurationMs > 0U)) {
-            context->state = APP_LINE_LAP_BRAKING;
-            context->brakeStartTick = now;
-            App_VehicleClosedLoopDisable();
-            Set_Speed((int)-brakePwm, (int)-brakePwm);
+            if (brakeDelayPulses > 0U) {
+                context->brakePending = 1U;
+                context->brakeDetectEncL = Encoder_CumulativeL;
+                context->brakeDetectEncR = Encoder_CumulativeR;
+            } else {
+                context->state = APP_LINE_LAP_BRAKING;
+                context->brakeStartTick = now;
+                App_LineApplyBrake(brakePwm);
+            }
         } else {
             App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
@@ -285,12 +328,13 @@ static void App_LineLapRun(App_LineLapContext *context,
                        (unsigned long)(elapsed / 1000U),
                        (unsigned long)((elapsed % 1000U) / 100U));
         uart0_send_string(message);
-        return;
+        if (context->brakePending == 0U) {
+            return;
+        }
     }
 
     /* 编码器距离停车(Task3)：|ΔL|+|ΔR| >= 阈值 → 停车 */
-    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
-        (context->stopOnDist != 0U)) {
+    if (context->stopOnDist != 0U) {
         int32_t dL = Encoder_CumulativeL - context->startEncL;
         int32_t dR = Encoder_CumulativeR - context->startEncR;
         uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
@@ -304,8 +348,7 @@ static void App_LineLapRun(App_LineLapContext *context,
 
     LineTrace_ControllerStep(&context->controller, config,
                              hasLine, errorTenths, &controlOutput);
-    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
-        (controlOutput.shouldStop != 0U)) {
+    if (controlOutput.shouldStop != 0U) {
         char message[20];
 
         App_VehicleClosedLoopStop();
@@ -323,7 +366,8 @@ static void App_LineLapRun(App_LineLapContext *context,
 void App_Task1Run(void)
 {
     App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U,
-                   APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS);
+                   APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS,
+                   APP_TASK1_BRAKE_DELAY_PULSES);
 }
 
 /*
@@ -385,11 +429,13 @@ void App_Task3Run(void)
         break; }
     case T3_READY:
         /* 等待中键按下启动循迹 */
-        App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U, 0, 0U);
+        App_LineLapRun(&task3LineContext, &task2StableControlConfig,
+                       3U, 0, 0U, 0U);
         if (task3LineContext.state == APP_LINE_LAP_TRACKING) state = T3_TRACK;
         break;
     case T3_TRACK:
-        App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U, 0, 0U);
+        App_LineLapRun(&task3LineContext, &task2StableControlConfig,
+                       3U, 0, 0U, 0U);
         if (task3LineContext.state == APP_LINE_LAP_STOPPED) state = T3_FINISH;
         break;
     case T3_FINISH: {
@@ -436,11 +482,13 @@ void App_Task4Run(void)
         App_VehicleClosedLoopStop();
         break; }
     case T4_READY:
-        App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U, 0, 0U);
+        App_LineLapRun(&task4LineContext, &task2StableControlConfig,
+                       4U, 0, 0U, 0U);
         if (task4LineContext.state == APP_LINE_LAP_TRACKING) state = T4_TRACK;
         break;
     case T4_TRACK:
-        App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U, 0, 0U);
+        App_LineLapRun(&task4LineContext, &task2StableControlConfig,
+                       4U, 0, 0U, 0U);
         if (task4LineContext.state == APP_LINE_LAP_STOPPED) state = T4_FINISH;
         break;
     case T4_FINISH: {
@@ -487,11 +535,13 @@ void App_Task5Run(void)
         App_VehicleClosedLoopStop();
         break; }
     case T5_READY:
-        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        App_LineLapRun(&task5LineContext, &task2StableControlConfig,
+                       5U, 0, 0U, 0U);
         if (task5LineContext.state == APP_LINE_LAP_TRACKING) state = T5_TRACK;
         break;
     case T5_TRACK:
-        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        App_LineLapRun(&task5LineContext, &task2StableControlConfig,
+                       5U, 0, 0U, 0U);
         if (task5LineContext.state == APP_LINE_LAP_STOPPED) state = T5_FINISH;
         break;
     case T5_FINISH: {
@@ -835,7 +885,7 @@ void App_Run(void)
     }
 
     /* 无任务时停车；有任务时由 Task 接管 */
-    if ((g_active_task == 0U) && !App_VehicleClosedLoopIsEnabled()) {
+    if (g_active_task == 0U) {
         App_VehicleClosedLoopStop();
     }
 
