@@ -65,7 +65,7 @@ static const LineTrace_ControlConfig lineControlTestConfig = {
     .edgeSteeringThreshold = 6,
     .steeringMax = 480,
     .leftPwmBias = 50,
-    .rightTurnBoost = 120,
+    .rightTurnBoost = 135,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
@@ -88,7 +88,7 @@ static const LineTrace_ControlConfig lineControlStableTestConfig = {
     .edgeSteeringThreshold = 6,
     .steeringMax = 240,
     .leftPwmBias = 39,
-    .rightTurnBoost = 60,
+    .rightTurnBoost = 70,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
@@ -192,7 +192,7 @@ static uint32_t LineTrace_TestController(void)
     if ((output.filteredError != 11) ||
         (output.correction != 132) ||
         (output.basePwm != 1100) ||
-        (output.leftPwm != 1318) || (output.rightPwm != 968)) {
+        (output.leftPwm != 1322) || (output.rightPwm != 968)) {
         failures++;
     }
     for (frame = 0U; frame < 3U; frame++) {
@@ -201,7 +201,7 @@ static uint32_t LineTrace_TestController(void)
     }
     if ((output.basePwm != 1068) ||
         (output.correction != 198) ||
-        (output.leftPwm != 1369) || (output.rightPwm != 870)) {
+        (output.leftPwm != 1376) || (output.rightPwm != 870)) {
         failures++;
     }
 
@@ -210,7 +210,7 @@ static uint32_t LineTrace_TestController(void)
                              1U, 35, &output);
     if ((output.filteredError != 17) ||
         (output.correction != 264) ||
-        (output.leftPwm != 1486) || (output.rightPwm != 836)) {
+        (output.leftPwm != 1495) || (output.rightPwm != 836)) {
         failures++;
     }
 
@@ -285,7 +285,7 @@ static uint32_t LineTrace_TestStableController(void)
     if ((output.filteredError != 11) ||
         (output.basePwm != 702) ||
         (output.correction != 84) ||
-        (output.leftPwm != 846) || (output.rightPwm != 618)) {
+        (output.leftPwm != 849) || (output.rightPwm != 618)) {
         failures++;
     }
 
