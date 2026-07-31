@@ -11,7 +11,8 @@ typedef enum {
     MENU_PAGE_MAIN = 0,
     MENU_PAGE_TASKS,
     MENU_PAGE_PARAMETERS,
-    MENU_PAGE_STATUS
+    MENU_PAGE_STATUS,
+    MENU_PAGE_TIMER
 } Menu_Page;
 
 typedef enum {
@@ -64,6 +65,8 @@ typedef struct {
     bool batteryLow;            /**< 电池电压是否低于提醒阈值。 */
     uint16_t batteryMv;         /**< 电池端电压，单位 mV。 */
 
+    uint16_t taskTimeSeconds;   /**< 当前任务运行秒数，0 表示无任务运行。 */
+
     uint16_t keyAdc;            /**< 五向按键 ADC 最近一次原始值。 */
     uint16_t encoderLines;      /**< 编码器线数。 */
     uint16_t gearRatio;         /**< 电机减速比。 */
@@ -101,6 +104,8 @@ const char *Menu_GetMainItemName(uint8_t index);
 bool Menu_IsDirty(const Menu_State *state);
 bool Menu_IsDynamicPage(const Menu_State *state);
 void Menu_MarkRendered(Menu_State *state);
+void Menu_ForcePage(Menu_State *state, Menu_Page page);
+void Menu_SetTaskTime(uint16_t seconds);
 
 /**
  * @brief 根据菜单状态和数据刷新 OLED 菜单显示。

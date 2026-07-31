@@ -266,4 +266,7 @@ void App_MenuInvalidateCarSpeed(void);
  */
 void App_MenuInvalidateTof(void);
 
+void App_MenuSetTaskTime(uint16_t seconds);
+void App_MenuForceTimerPage(void);
+
 #endif

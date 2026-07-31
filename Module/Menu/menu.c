@@ -94,6 +94,14 @@ void Menu_HandleInput(Menu_State *state, Menu_Input input)
             }
         }
     }
+
+    if (state->page == MENU_PAGE_TIMER) {
+        if (input == MENU_INPUT_BACK) {
+            state->page = MENU_PAGE_MAIN;
+            state->activeTask = 0U;
+            state->dirty = true;
+        }
+    }
 }
 
 /**
@@ -153,11 +161,25 @@ bool Menu_IsDirty(const Menu_State *state)
     return state->dirty;
 }
 
+static uint16_t g_timerSeconds;
+
+void Menu_SetTaskTime(uint16_t seconds)
+{
+    g_timerSeconds = seconds;
+}
+
+void Menu_ForcePage(Menu_State *state, Menu_Page page)
+{
+    state->page = page;
+    state->dirty = true;
+}
+
 bool Menu_IsDynamicPage(const Menu_State *state)
 {
     return (state->page == MENU_PAGE_MAIN) ||
            (state->page == MENU_PAGE_PARAMETERS) ||
-           (state->page == MENU_PAGE_STATUS);
+           (state->page == MENU_PAGE_STATUS) ||
+           (state->page == MENU_PAGE_TIMER);
 }
 
 /**
@@ -368,6 +390,17 @@ static void Menu_RenderStatus(const Menu_ViewData *data)
 }
 
 /**
+ * @brief 渲染计时页面（全屏，仅第一行显示 Time:xxs）。
+ * @param 无。
+ */
+static void Menu_RenderTimer(void)
+{
+    char line[MENU_LINE_LENGTH + 1U];
+    (void) snprintf(line, sizeof(line), "Time:%us", (unsigned int)g_timerSeconds);
+    Menu_DrawLine(0U, line);
+}
+
+/**
  * @brief 根据当前页面渲染 OLED 菜单。
  * @param state 状态枚举值。
  * @param data 数据缓冲区。
@@ -379,6 +412,9 @@ void Menu_Render(Menu_State *state, const Menu_ViewData *data)
     Menu_ClearFrame();
 
     switch (state->page) {
+        case MENU_PAGE_TIMER:
+            Menu_RenderTimer();
+            break;
         case MENU_PAGE_TASKS:
             Menu_RenderTasks(state);
             break;

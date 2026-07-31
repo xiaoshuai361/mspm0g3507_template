@@ -179,6 +179,8 @@ static void App_LineLapRun(App_LineLapContext *context,
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
         context->curveConfirmCnt = 0U;
         Set_Speed(0, 0);
+        App_MenuForceTimerPage();
+        Menu_SetTaskTime(0U);
         (void)snprintf(message, sizeof(message), "T%u: START\r\n",
                        (unsigned int)taskNumber);
         uart0_send_string(message);
@@ -194,6 +196,15 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
     context->lastTick = now;
+
+    /* 每秒更新计时显示 */
+    {   static uint16_t lastReportedSec;
+        uint16_t sec = (uint16_t)((now - context->startTick) / 1000U);
+        if (sec != lastReportedSec) {
+            lastReportedSec = sec;
+            Menu_SetTaskTime(sec);
+        }
+    }
 
     Grayscale_Read();
     raw = Grayscale_GetRaw();

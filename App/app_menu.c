@@ -195,6 +195,16 @@ void App_MenuSetSpeedData(int16_t leftTenths, int16_t rightTenths)
     menuData.speedValid = true;
 }
 
+void App_MenuSetTaskTime(uint16_t seconds)
+{
+    menuData.taskTimeSeconds = seconds;
+}
+
+void App_MenuForceTimerPage(void)
+{
+    Menu_ForcePage(&menuState, MENU_PAGE_TIMER);
+}
+
 /**
  * @brief 更新小车状态页显示的 ToF 距离，单位为 mm。
  * @param distanceMm 输出距离，单位 mm。
