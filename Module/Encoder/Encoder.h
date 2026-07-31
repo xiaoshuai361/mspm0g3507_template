@@ -33,6 +33,8 @@ extern float Measure_Distance; /**< Measure_Distance 全局状态或配置变量
 
 extern int32_t Motor1_Encoder_Value; /**< 左轮编码器累计计数。 */
 extern int32_t Motor2_Encoder_Value; /**< 右轮编码器累计计数。 */
+extern int32_t Encoder_CumulativeL;  /**< 左轮上电后累计值（不清零）。 */
+extern int32_t Encoder_CumulativeR;  /**< 右轮上电后累计值（不清零）。 */
 extern volatile uint32_t g_encoder_gpioa_isr_count; /**< g_encoder_gpioa_isr_count 全局状态或配置变量。 */
 extern volatile uint32_t g_encoder_gpiob_isr_count; /**< g_encoder_gpiob_isr_count 全局状态或配置变量。 */
 extern volatile uint32_t g_encoder_empty_isr_count; /**< g_encoder_empty_isr_count 全局状态或配置变量。 */

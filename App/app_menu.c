@@ -138,6 +138,10 @@ void App_MenuRun(void)
 
     App_UpdateCarSpeedDisplay();
 
+    /* 编码器累计值更新到菜单 */
+    menuData.encoderLeft  = Encoder_CumulativeL;
+    menuData.encoderRight = Encoder_CumulativeR;
+
     if (Menu_IsDirty(&menuState) ||
         (Menu_IsDynamicPage(&menuState) &&
          ((uint32_t)(now - lastDisplayTick) >= APP_MENU_DYNAMIC_DISPLAY_PERIOD_MS)))

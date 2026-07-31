@@ -93,6 +93,8 @@ void uart2_send_string(const char *str)
  * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
  * @retval 无。
  */
+/* 蓝牙已替换为香橙派通信，ISR移至 Module/OrangePi/opipi.c */
+#if 0
 void UART2_IRQHandler()
 {
     g_uart2_isr_count++;
@@ -118,6 +120,7 @@ void UART2_IRQHandler()
 
     DL_UART_clearInterruptStatus(UART_2_INST, UART_2_INST->CPU_INT.RIS);
 }
+#endif /* 0 - 蓝牙替换为香橙派 */
 
 /**
  * @brief 原子读取 UART2 最近一个有效蓝牙字节。

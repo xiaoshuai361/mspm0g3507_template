@@ -277,8 +277,15 @@ static uint8_t accelFull;                 /* 缓冲是否已填满一轮 */
 #define SPEED_FLT_ALPHA  (0.15f)           /* 速度低通：0.85*旧 + 0.15*新 */
 #define ACCEL_FLT_ALPHA  (0.10f)           /* 加速度低通：0.9*旧 + 0.1*新 */
 
+int32_t Encoder_CumulativeL;  /**< 左轮上电后累计（不清零）。 */
+int32_t Encoder_CumulativeR;  /**< 右轮上电后累计（不清零）。 */
+
 void MEASURE_MOTORS_SPEED(void)
 {
+    /* 累积编码器值（清空前保存） */
+    Encoder_CumulativeL += Motor1_Encoder_Value;
+    Encoder_CumulativeR += Motor2_Encoder_Value;
+
     Motor1_Get_Speed();
     Motor2_Get_Speed();
 

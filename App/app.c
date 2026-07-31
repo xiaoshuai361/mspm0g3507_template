@@ -16,6 +16,7 @@
 #include "motor.h"
 #include "Encoder.h"
 #include "oled.h"
+#include "../Module/OrangePi/opipi.h"
 #include "uart.h"
 
 volatile uint32_t g_key5d_self_test_failures; /**< 五向按键自检失败项数量。 */
@@ -67,15 +68,18 @@ enum {
 typedef struct {
     uint8_t state;
     uint8_t startKeyArmed;
-    uint8_t stopOnCurve;       /* 1=遇弯道停车(Task3) */
+    uint8_t stopOnDist;        /* 1=编码器距离停车(Task3) */
     uint32_t lastTick;
     uint32_t startTick;
     uint32_t brakeStartTick;
     uint16_t crossLockout;
     uint8_t crossConfirm;
-    uint8_t curveConfirmCnt;   /* 弯道确认计数 */
+    int32_t startEncL;         /* 启动时左编码器累计值 */
+    int32_t startEncR;         /* 启动时右编码器累计值 */
     LineTrace_Controller controller;
 } App_LineLapContext;
+
+#define TASK3_STOP_DIST_AB 12600  /* A→B 1.5m直线脉冲阈值 */
 
 /*
  * Task 1 调参顺序：半圆转不动先增 edgeSteeringKp，再减
@@ -130,7 +134,7 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
 
 static App_LineLapContext task1LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task3LineContext = {
-    .startKeyArmed = 1U, .stopOnCurve = 1U };
+    .startKeyArmed = 1U, .stopOnDist = 1U };
 static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
 
@@ -185,7 +189,8 @@ static void App_LineLapRun(App_LineLapContext *context,
         LineTrace_ResetCrossDetect(&context->crossLockout,
                                    &context->crossConfirm);
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
-        context->curveConfirmCnt = 0U;
+        context->startEncL = Encoder_CumulativeL;
+        context->startEncR = Encoder_CumulativeR;
         Set_Speed(0, 0);
         App_MenuForceTimerPage();
         Menu_SetTaskTime(0U);
@@ -243,18 +248,16 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
 
-    /* 弯道停车(Task3)：|偏差|>15 连续5帧 → 停车 */
-    if (context->stopOnCurve != 0U) {
-        if (errorTenths > 15 || errorTenths < -15) {
-            context->curveConfirmCnt++;
-            if (context->curveConfirmCnt >= 5U) {
-                Set_Speed(0, 0);
-                context->state = APP_LINE_LAP_STOPPED;
-                uart0_send_string("T3: CURVE STOP\r\n");
-                return;
-            }
-        } else {
-            context->curveConfirmCnt = 0U;
+    /* 编码器距离停车(Task3)：|ΔL|+|ΔR| >= 阈值 → 停车 */
+    if (context->stopOnDist != 0U) {
+        int32_t dL = Encoder_CumulativeL - context->startEncL;
+        int32_t dR = Encoder_CumulativeR - context->startEncR;
+        uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
+        if (dist >= TASK3_STOP_DIST_AB) {
+            Set_Speed(0, 0);
+            context->state = APP_LINE_LAP_STOPPED;
+            uart0_send_string("T3: DIST STOP\r\n");
+            return;
         }
     }
 
@@ -281,31 +284,189 @@ void App_Task1Run(void)
                    APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS);
 }
 
-/* Task 2：静止，暂无操作（题3摆球控制，队友负责）。 */
+/*
+ * Task 2 —— 题3：摆杆球控制（香橙派协议）
+ * 发送AA 03 → 等待AA 00 → 完成
+ */
 void App_Task2Run(void)
 {
+    enum { T2_SEND, T2_WAIT, T2_DONE };
+    static uint8_t state = T2_SEND;
+    static uint8_t lastActive;
+
+    if (lastActive != 2U) { lastActive = 2U; state = T2_SEND; OPi_FlushRx(); }
     Set_Speed(0, 0);
+
+    switch (state) {
+    case T2_SEND:
+        OPi_SendCmd(OPI_CMD_TASK3);
+        state = T2_WAIT;
+        break;
+    case T2_WAIT: {
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) state = T2_DONE;
+        break; }
+    case T2_DONE: {
+        Key5D_Event ev = KEY5D_EVENT_NONE;
+        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
+            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) { state = T2_SEND; }
+        break; }
+    default: break;
+    }
 }
 
-/* Task 3：稳定档直线循迹 + 遇弯道停车（B点=入弯检测）。 */
+/*
+ * Task 3 —— 题4：A→B（香橙派协议 + 编码器距离停车）
+ * 发送AA 04 → 等待AA 00 → 循迹 → 停车发AA 0F → 等待AA 00
+ */
 void App_Task3Run(void)
 {
-    App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U,
-                   0, 0U);
+    enum { T3_SEND, T3_WAIT, T3_READY, T3_TRACK, T3_FINISH, T3_DONE };
+    static uint8_t state = T3_SEND;
+    static uint8_t lastActive;
+
+    if (lastActive != 3U) {
+        lastActive = 3U; state = T3_SEND; OPi_FlushRx();
+        App_LineLapReset(&task3LineContext);
+    }
+
+    switch (state) {
+    case T3_SEND:
+        OPi_SendCmd(OPI_CMD_TASK4);
+        state = T3_WAIT;
+        break;
+    case T3_WAIT: {
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
+            App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T3_READY;
+        Set_Speed(0, 0);
+        break; }
+    case T3_READY:
+        /* 等待中键按下启动循迹 */
+        App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U, 0, 0U);
+        if (task3LineContext.state == APP_LINE_LAP_TRACKING) state = T3_TRACK;
+        break;
+    case T3_TRACK:
+        App_LineLapRun(&task3LineContext, &task2StableControlConfig, 3U, 0, 0U);
+        if (task3LineContext.state == APP_LINE_LAP_STOPPED) state = T3_FINISH;
+        break;
+    case T3_FINISH: {
+        static uint8_t sent;
+        if (sent == 0U) { OPi_SendCmd(OPI_CMD_FINISH); sent = 1U; }
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) { sent = 0U; state = T3_DONE; }
+        break; }
+    case T3_DONE: {
+        Key5D_Event ev = KEY5D_EVENT_NONE;
+        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
+            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
+            state = T3_SEND; OPi_FlushRx(); App_LineLapReset(&task3LineContext);
+        }
+        break; }
+    default: break;
+    }
 }
 
-/* Task 4：稳定档 + 遇A停车（同Task2稳定参数）。 */
+/*
+ * Task 4 —— 题5：单圈+经过A（香橙派协议，球稳定后发车）
+ * 发送AA 05 → 等待AA 00 → 循迹 → 停车发AA 0F → 等待AA 00
+ */
 void App_Task4Run(void)
 {
-    App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U,
-                   0, 0U);
+    enum { T4_SEND, T4_WAIT, T4_READY, T4_TRACK, T4_FINISH, T4_DONE };
+    static uint8_t state = T4_SEND;
+    static uint8_t lastActive;
+
+    if (lastActive != 4U) {
+        lastActive = 4U; state = T4_SEND; OPi_FlushRx();
+        App_LineLapReset(&task4LineContext);
+    }
+
+    switch (state) {
+    case T4_SEND:
+        OPi_SendCmd(OPI_CMD_TASK5);
+        state = T4_WAIT;
+        break;
+    case T4_WAIT: {
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
+            App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T4_READY;
+        Set_Speed(0, 0);
+        break; }
+    case T4_READY:
+        App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U, 0, 0U);
+        if (task4LineContext.state == APP_LINE_LAP_TRACKING) state = T4_TRACK;
+        break;
+    case T4_TRACK:
+        App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U, 0, 0U);
+        if (task4LineContext.state == APP_LINE_LAP_STOPPED) state = T4_FINISH;
+        break;
+    case T4_FINISH: {
+        static uint8_t sent;
+        if (sent == 0U) { OPi_SendCmd(OPI_CMD_FINISH); sent = 1U; }
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) { sent = 0U; state = T4_DONE; }
+        break; }
+    case T4_DONE: {
+        Key5D_Event ev = KEY5D_EVENT_NONE;
+        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
+            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
+            state = T4_SEND; OPi_FlushRx(); App_LineLapReset(&task4LineContext);
+        }
+        break; }
+    default: break;
+    }
 }
 
-/* Task 5：稳定档 + 遇A停车（同Task2稳定参数）。 */
+/*
+ * Task 5 —— 题6：单圈+经过A（香橙派协议，不记录初始位置直接发车）
+ * 发送AA 06 → 等待AA 00 → 循迹 → 停车发AA 0F → 等待AA 00
+ */
 void App_Task5Run(void)
 {
-    App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U,
-                   0, 0U);
+    enum { T5_SEND, T5_WAIT, T5_READY, T5_TRACK, T5_FINISH, T5_DONE };
+    static uint8_t state = T5_SEND;
+    static uint8_t lastActive;
+
+    if (lastActive != 5U) {
+        lastActive = 5U; state = T5_SEND; OPi_FlushRx();
+        App_LineLapReset(&task5LineContext);
+    }
+
+    switch (state) {
+    case T5_SEND:
+        OPi_SendCmd(OPI_CMD_TASK6);
+        state = T5_WAIT;
+        break;
+    case T5_WAIT: {
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
+            App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T5_READY;
+        Set_Speed(0, 0);
+        break; }
+    case T5_READY:
+        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        if (task5LineContext.state == APP_LINE_LAP_TRACKING) state = T5_TRACK;
+        break;
+    case T5_TRACK:
+        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        if (task5LineContext.state == APP_LINE_LAP_STOPPED) state = T5_FINISH;
+        break;
+    case T5_FINISH: {
+        static uint8_t sent;
+        if (sent == 0U) { OPi_SendCmd(OPI_CMD_FINISH); sent = 1U; }
+        uint8_t b;
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) { sent = 0U; state = T5_DONE; }
+        break; }
+    case T5_DONE: {
+        Key5D_Event ev = KEY5D_EVENT_NONE;
+        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
+            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
+            state = T5_SEND; OPi_FlushRx(); App_LineLapReset(&task5LineContext);
+        }
+        break; }
+    default: break;
+    }
 }
 
 /*
@@ -590,6 +751,8 @@ void App_Init(void)
 
     uart0_init();
     uart0_send_string("BOOT uart0 OK\r\n");
+    OPi_Init();
+    uart0_send_string("BOOT opi OK\r\n");
     uart0_send_string("BOOT oled init\r\n");
     OLED_Init();
     uart0_send_string("BOOT oled OK\r\n");
@@ -614,6 +777,20 @@ void App_Run(void)
     App_BatteryRun();
     App_ElectromagnetRun();
     App_MenuRun();
+
+    /* 编码器中断始终开启，无任务时也周期测速（Car Status 需要累计值） */
+    {
+        static uint8_t encInited;
+        if (encInited == 0U) { encInited = 1U; Encoder_Init(); }
+    }
+    {
+        static uint32_t lastEncTick;
+        uint32_t now = BSP_Delay_GetTick();
+        if ((uint32_t)(now - lastEncTick) >= 20U) {
+            lastEncTick = now;
+            MEASURE_MOTORS_SPEED();
+        }
+    }
 
     /* 无任务时停车；有任务时由 Task 接管 */
     if (g_active_task == 0U) {
