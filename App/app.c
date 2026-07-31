@@ -67,15 +67,18 @@ enum {
 typedef struct {
     uint8_t state;
     uint8_t startKeyArmed;
-    uint8_t stopOnCurve;       /* 1=遇弯道停车(Task3) */
+    uint8_t stopOnDist;        /* 1=编码器距离停车(Task3) */
     uint32_t lastTick;
     uint32_t startTick;
     uint32_t brakeStartTick;
     uint16_t crossLockout;
     uint8_t crossConfirm;
-    uint8_t curveConfirmCnt;   /* 弯道确认计数 */
+    int32_t startEncL;         /* 启动时左编码器累计值 */
+    int32_t startEncR;         /* 启动时右编码器累计值 */
     LineTrace_Controller controller;
 } App_LineLapContext;
+
+#define TASK3_STOP_DIST_AB 12600  /* A→B 1.5m直线脉冲阈值 */
 
 /*
  * Task 1 调参顺序：半圆转不动先增 edgeSteeringKp，再减
@@ -130,7 +133,7 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
 
 static App_LineLapContext task1LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task3LineContext = {
-    .startKeyArmed = 1U, .stopOnCurve = 1U };
+    .startKeyArmed = 1U, .stopOnDist = 1U };
 static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
 
@@ -185,7 +188,8 @@ static void App_LineLapRun(App_LineLapContext *context,
         LineTrace_ResetCrossDetect(&context->crossLockout,
                                    &context->crossConfirm);
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
-        context->curveConfirmCnt = 0U;
+        context->startEncL = Encoder_CumulativeL;
+        context->startEncR = Encoder_CumulativeR;
         Set_Speed(0, 0);
         App_MenuForceTimerPage();
         Menu_SetTaskTime(0U);
@@ -243,18 +247,16 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
 
-    /* 弯道停车(Task3)：|偏差|>15 连续5帧 → 停车 */
-    if (context->stopOnCurve != 0U) {
-        if (errorTenths > 15 || errorTenths < -15) {
-            context->curveConfirmCnt++;
-            if (context->curveConfirmCnt >= 5U) {
-                Set_Speed(0, 0);
-                context->state = APP_LINE_LAP_STOPPED;
-                uart0_send_string("T3: CURVE STOP\r\n");
-                return;
-            }
-        } else {
-            context->curveConfirmCnt = 0U;
+    /* 编码器距离停车(Task3)：|ΔL|+|ΔR| >= 阈值 → 停车 */
+    if (context->stopOnDist != 0U) {
+        int32_t dL = Encoder_CumulativeL - context->startEncL;
+        int32_t dR = Encoder_CumulativeR - context->startEncR;
+        uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
+        if (dist >= TASK3_STOP_DIST_AB) {
+            Set_Speed(0, 0);
+            context->state = APP_LINE_LAP_STOPPED;
+            uart0_send_string("T3: DIST STOP\r\n");
+            return;
         }
     }
 
@@ -614,6 +616,20 @@ void App_Run(void)
     App_BatteryRun();
     App_ElectromagnetRun();
     App_MenuRun();
+
+    /* 编码器中断始终开启，无任务时也周期测速（Car Status 需要累计值） */
+    {
+        static uint8_t encInited;
+        if (encInited == 0U) { encInited = 1U; Encoder_Init(); }
+    }
+    {
+        static uint32_t lastEncTick;
+        uint32_t now = BSP_Delay_GetTick();
+        if ((uint32_t)(now - lastEncTick) >= 20U) {
+            lastEncTick = now;
+            MEASURE_MOTORS_SPEED();
+        }
+    }
 
     /* 无任务时停车；有任务时由 Task 接管 */
     if (g_active_task == 0U) {

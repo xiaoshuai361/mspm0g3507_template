@@ -68,6 +68,8 @@ typedef struct {
     uint16_t taskTimeSeconds;   /**< 当前任务运行秒数，0 表示无任务运行。 */
 
     uint16_t keyAdc;            /**< 五向按键 ADC 最近一次原始值。 */
+    int32_t encoderLeft;        /**< 左轮上电累计值。 */
+    int32_t encoderRight;       /**< 右轮上电累计值。 */
     uint16_t encoderLines;      /**< 编码器线数。 */
     uint16_t gearRatio;         /**< 电机减速比。 */
     uint8_t encoderMultiplier;  /**< 编码器计数倍频。 */
