@@ -166,6 +166,26 @@ static void App_LineLapReset(App_LineLapContext *context)
                                &context->crossConfirm);
 }
 
+static float App_LinePwmToSpeedTarget(int16_t equivalentPwm)
+{
+    return ((float)equivalentPwm * APP_VEHICLE_DEFAULT_SPEED) /
+           (float)APP_STABLE_LINE_CRUISE_PWM;
+}
+
+static void App_LineApplyClosedLoopTarget(
+    const LineTrace_ControlOutput *controlOutput)
+{
+    const int16_t leftEquivalentPwm = (int16_t)(
+        controlOutput->basePwm + controlOutput->correction);
+    const int16_t rightEquivalentPwm = (int16_t)(
+        controlOutput->basePwm - controlOutput->correction);
+
+    /* 固定 PWM 偏置由速度环自动补偿，只保留巡线产生的目标差速。 */
+    App_VehicleClosedLoopSetTarget(
+        App_LinePwmToSpeedTarget(leftEquivalentPwm),
+        App_LinePwmToSpeedTarget(rightEquivalentPwm));
+}
+
 static void App_LineLapRun(App_LineLapContext *context,
                            const LineTrace_ControlConfig *config,
                            uint8_t taskNumber, int16_t brakePwm,
@@ -187,7 +207,7 @@ static void App_LineLapRun(App_LineLapContext *context,
             brakeDurationMs) {
             Set_Speed((int)-brakePwm, (int)-brakePwm);
         } else {
-            Set_Speed(0, 0);
+            App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
         }
         return;
@@ -207,7 +227,7 @@ static void App_LineLapRun(App_LineLapContext *context,
         context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
         context->startEncL = Encoder_CumulativeL;
         context->startEncR = Encoder_CumulativeR;
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         App_MenuForceTimerPage();
         Menu_SetTaskTime(0U);
         (void)snprintf(message, sizeof(message), "T%u: START\r\n",
@@ -217,7 +237,7 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
 
     if (context->state != APP_LINE_LAP_TRACKING) {
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         return;
     }
     if ((uint32_t)(now - context->lastTick) <
@@ -250,9 +270,10 @@ static void App_LineLapRun(App_LineLapContext *context,
         if ((brakePwm > 0) && (brakeDurationMs > 0U)) {
             context->state = APP_LINE_LAP_BRAKING;
             context->brakeStartTick = now;
+            App_VehicleClosedLoopDisable();
             Set_Speed((int)-brakePwm, (int)-brakePwm);
         } else {
-            Set_Speed(0, 0);
+            App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
         }
         (void)snprintf(message, sizeof(message),
@@ -270,7 +291,7 @@ static void App_LineLapRun(App_LineLapContext *context,
         int32_t dR = Encoder_CumulativeR - context->startEncR;
         uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
         if (dist >= TASK3_STOP_DIST_AB) {
-            Set_Speed(0, 0);
+            App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
             uart0_send_string("T3: DIST STOP\r\n");
             return;
@@ -282,7 +303,7 @@ static void App_LineLapRun(App_LineLapContext *context,
     if (controlOutput.shouldStop != 0U) {
         char message[20];
 
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         context->state = APP_LINE_LAP_STOPPED;
         (void)snprintf(message, sizeof(message), "T%u: LOST\r\n",
                        (unsigned int)taskNumber);
@@ -290,7 +311,7 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
 
-    Set_Speed((int)controlOutput.leftPwm, (int)controlOutput.rightPwm);
+    App_LineApplyClosedLoopTarget(&controlOutput);
 }
 
 /* Task 1：1100 PWM 竞速档 + 遇A停车。 */
@@ -311,7 +332,7 @@ void App_Task2Run(void)
     static uint8_t lastActive;
 
     if (lastActive != 2U) { lastActive = 2U; state = T2_SEND; OPi_FlushRx(); }
-    Set_Speed(0, 0);
+    App_VehicleClosedLoopStop();
 
     switch (state) {
     case T2_SEND:
@@ -355,7 +376,7 @@ void App_Task3Run(void)
         uint8_t b;
         if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
             App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T3_READY;
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         break; }
     case T3_READY:
         /* 等待中键按下启动循迹 */
@@ -407,7 +428,7 @@ void App_Task4Run(void)
         uint8_t b;
         if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
             App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T4_READY;
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         break; }
     case T4_READY:
         App_LineLapRun(&task4LineContext, &task2StableControlConfig, 4U, 0, 0U);
@@ -458,7 +479,7 @@ void App_Task5Run(void)
         uint8_t b;
         if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
             App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T5_READY;
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         break; }
     case T5_READY:
         App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
@@ -495,7 +516,7 @@ void App_TasksRun(void)
     static uint8_t previousTask;
 
     if (g_active_task != previousTask) {
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
         App_LineLapReset(&task1LineContext);
         App_LineLapReset(&task3LineContext);
         App_LineLapReset(&task4LineContext);
@@ -802,24 +823,17 @@ void App_Run(void)
         App_MenuRun();
     }
 
-    /* 编码器中断始终开启，为速度反馈和 Task3 距离停车周期测速。 */
+    /* 编码器中断始终开启，停车时也继续累计脉冲。 */
     {
         static uint8_t encInited;
         if (encInited == 0U) { encInited = 1U; Encoder_Init(); }
     }
-    {
-        static uint32_t lastEncTick;
-        uint32_t now = BSP_Delay_GetTick();
-        if ((uint32_t)(now - lastEncTick) >= 20U) {
-            lastEncTick = now;
-            MEASURE_MOTORS_SPEED();
-        }
-    }
 
     /* 无任务时停车；有任务时由 Task 接管 */
     if (g_active_task == 0U) {
-        Set_Speed(0, 0);
+        App_VehicleClosedLoopStop();
     }
 
     App_TasksRun();
+    App_VehicleControlRun();
 }

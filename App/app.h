@@ -122,7 +122,7 @@ void App_LineTraceRun(void);
 /**
  * @brief 运行车辆速度闭环控制任务。
  * @param 无。
- * @note 周期测速、PID 计算并输出 PWM。
+ * @note 始终周期测速；闭环启用时执行 PID 计算并输出 PWM。
  * @retval 无。
  */
 void App_VehicleControlRun(void);

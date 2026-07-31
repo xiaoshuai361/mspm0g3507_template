@@ -22,6 +22,7 @@ volatile int16_t g_vehicle_line_error_tenths; /**< 加权循迹偏差，单位 0
 volatile uint8_t g_vehicle_line_active_count; /**< 当前检测到黑线的灰度通道数量。 */
 
 static bool vehicleInitialized;                         /**< 车辆外设和控制状态已初始化标志。 */
+static bool speedLoopEnabled;                           /**< 左右轮速度闭环输出使能标志。 */
 static float standardSpeed = APP_VEHICLE_DEFAULT_SPEED; /**< 蓝牙手动控制和循迹控制使用的基准速度。 */
 static uint32_t lastLineTick;                           /**< 上一次灰度循迹采样时间戳。 */
 static uint32_t lastSpeedTick;                          /**< 上一次编码器测速时间戳。 */
@@ -87,21 +88,15 @@ static int16_t App_VehicleSpeedToTenths(float speed)
     return (int16_t)tenths;
 }
 
-/**
- * @brief 将当前目标速度和实测速度发布到菜单显示数据。
- * @param 无。
- * @note Speed 页显示车辆平均速度，状态页显示左右轮独立速度。
- * @retval 无。
- */
-static void App_VehiclePublishSpeed(void)
+static void App_VehicleResetPid(PID_t *pid)
 {
-    const float targetSpeed = (leftSpeedPid.Target + rightSpeedPid.Target) * 0.5f;
-    const float actualSpeed = (Motor1_Speed + Motor2_Speed) * 0.5f;
-
-    App_MenuSetCarSpeedData(App_VehicleSpeedToTenths(targetSpeed),
-                            App_VehicleSpeedToTenths(actualSpeed));
-    App_MenuSetSpeedData(App_VehicleSpeedToTenths(Motor1_Speed),
-                         App_VehicleSpeedToTenths(Motor2_Speed));
+    pid->Target = 0.0f;
+    pid->Actual = 0.0f;
+    pid->Out = 0.0f;
+    pid->Error0 = 0.0f;
+    pid->Error1 = 0.0f;
+    pid->ErrorInt = 0.0f;
+    pid->Deriv = 0.0f;
 }
 
 /**
@@ -111,40 +106,34 @@ static void App_VehiclePublishSpeed(void)
  * @note 仅更新 PID 目标，不直接写 PWM；实际输出由 App_VehicleControlRun() 周期完成。
  * @retval 无。
  */
-static void App_VehicleSetTarget(float leftTarget, float rightTarget)
+void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget)
 {
     leftSpeedPid.Target = leftTarget;
     rightSpeedPid.Target = rightTarget;
-    App_VehiclePublishSpeed();
+    speedLoopEnabled = true;
 }
 
-/**
- * @brief 清零 PID 状态并立即停车。
- * @param 无。
- * @note 蓝牙停止、循迹关闭和异常状态都通过这里清除积分和输出，避免重新启动时冲击。
- * @retval 无。
- */
-static void App_VehicleStop(void)
+void App_VehicleClosedLoopDisable(void)
 {
-    /* 停车时同步清目标、实际、输出和历史误差，避免积分残留。 */
-    leftSpeedPid.Target = 0.0f;
-    leftSpeedPid.Actual = 0.0f;
-    leftSpeedPid.Out = 0.0f;
-    leftSpeedPid.Error0 = 0.0f;
-    leftSpeedPid.Error1 = 0.0f;
-    leftSpeedPid.ErrorInt = 0.0f;
-    leftSpeedPid.Deriv = 0.0f;
+    if (!speedLoopEnabled)
+    {
+        return;
+    }
 
-    rightSpeedPid.Target = 0.0f;
-    rightSpeedPid.Actual = 0.0f;
-    rightSpeedPid.Out = 0.0f;
-    rightSpeedPid.Error0 = 0.0f;
-    rightSpeedPid.Error1 = 0.0f;
-    rightSpeedPid.ErrorInt = 0.0f;
-    rightSpeedPid.Deriv = 0.0f;
+    speedLoopEnabled = false;
+    App_VehicleResetPid(&leftSpeedPid);
+    App_VehicleResetPid(&rightSpeedPid);
+}
 
+void App_VehicleClosedLoopStop(void)
+{
+    App_VehicleClosedLoopDisable();
     Set_Speed(0, 0);
-    App_VehiclePublishSpeed();
+}
+
+float App_VehicleClosedLoopGetAverageTarget(void)
+{
+    return (leftSpeedPid.Target + rightSpeedPid.Target) * 0.5f;
 }
 
 /**
@@ -165,7 +154,7 @@ void App_VehicleInit(void)
     uart0_send_string("Vehicle uart2 OK\r\n");
     Encoder_Init();
     uart0_send_string("Vehicle encoder OK\r\n");
-    App_VehicleStop();
+    App_VehicleClosedLoopStop();
 
     vehicleInitialized = true;
     uart0_send_string("Vehicle init OK\r\n");
@@ -217,30 +206,30 @@ void App_BluetoothRun(void)
     {
     case 1U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleSetTarget(standardSpeed, standardSpeed);
+        App_VehicleClosedLoopSetTarget(standardSpeed, standardSpeed);
         break;
     case 2U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleSetTarget(-standardSpeed, -standardSpeed);
+        App_VehicleClosedLoopSetTarget(-standardSpeed, -standardSpeed);
         break;
     case 3U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleStop();
+        App_VehicleClosedLoopStop();
         break;
     case 4U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleSetTarget(standardSpeed, 0.0f);
+        App_VehicleClosedLoopSetTarget(standardSpeed, 0.0f);
         break;
     case 5U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleSetTarget(0.0f, standardSpeed);
+        App_VehicleClosedLoopSetTarget(0.0f, standardSpeed);
         break;
     case 6U:
         g_vehicle_follow_enabled = 1U;
         break;
     case 7U:
         g_vehicle_follow_enabled = 0U;
-        App_VehicleStop();
+        App_VehicleClosedLoopStop();
         break;
     default:
         break;
@@ -282,7 +271,8 @@ static void App_VehicleApplyLineError(int16_t errorTenths)
      * 这里是照片里的“normalize → 外环输出目标”的落地版本：
      * 灰度加权偏差只生成左右轮目标差速，实际 PWM 仍由后面的速度 PID 闭环计算。
      */
-    App_VehicleSetTarget(standardSpeed + correction, standardSpeed - correction);
+    App_VehicleClosedLoopSetTarget(standardSpeed + correction,
+                                   standardSpeed - correction);
 }
 
 /**
@@ -322,7 +312,7 @@ void App_LineTraceRun(void)
         }
         else
         {
-            App_VehicleStop();
+            App_VehicleClosedLoopStop();
         }
     }
 }
@@ -330,7 +320,7 @@ void App_LineTraceRun(void)
 /**
  * @brief 运行编码器测速和速度 PID 闭环输出。
  * @param 无。
- * @note 速度采样和 PID 周期由 APP_VEHICLE_SPEED_PERIOD_MS、APP_VEHICLE_CONTROL_PERIOD_MS 配置。
+ * @note 编码器始终周期测速；闭环启用后按控制周期读取最新反馈并输出 PWM。
  * @retval 无。
  */
 void App_VehicleControlRun(void)
@@ -343,6 +333,11 @@ void App_VehicleControlRun(void)
         MEASURE_MOTORS_SPEED();
     }
 
+    if (!speedLoopEnabled)
+    {
+        return;
+    }
+
     if ((uint32_t)(now - lastControlTick) >= APP_VEHICLE_CONTROL_PERIOD_MS)
     {
         lastControlTick = now;
@@ -353,7 +348,6 @@ void App_VehicleControlRun(void)
         PID_Update(&leftSpeedPid);
         PID_Update(&rightSpeedPid);
         Set_Speed((int)(leftSpeedPid.Out), (int)(rightSpeedPid.Out));
-        App_VehiclePublishSpeed();
     }
 }
 

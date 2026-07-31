@@ -53,6 +53,14 @@ void PID_Update(PID_t *p)
 		delta += p->Kd * p->Deriv;
 	}
 
+	if (p->DeltaMax > 0.0f)
+	{
+		if (delta > p->DeltaMax)
+			delta = p->DeltaMax;
+		if (delta < -p->DeltaMax)
+			delta = -p->DeltaMax;
+	}
+
 	/* 累加输出，输出限幅即天然抗饱和 */
 	p->Out += delta;
 	if (p->Out > p->OutMax)

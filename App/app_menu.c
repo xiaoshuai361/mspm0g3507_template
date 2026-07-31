@@ -56,10 +56,10 @@ static int16_t App_SpeedToTenths(float speed)
 static void App_UpdateCarSpeedDisplay(void)
 {
     const float actualSpeed = (Motor1_Speed + Motor2_Speed) * 0.5f;
-    const int16_t targetSpeed = menuData.carSpeedValid ?
-                                menuData.targetSpeedTenths : 0;
+    const float targetSpeed = App_VehicleClosedLoopGetAverageTarget();
 
-    App_MenuSetCarSpeedData(targetSpeed, App_SpeedToTenths(actualSpeed));
+    App_MenuSetCarSpeedData(App_SpeedToTenths(targetSpeed),
+                            App_SpeedToTenths(actualSpeed));
     App_MenuSetSpeedData(App_SpeedToTenths(Motor1_Speed),
                          App_SpeedToTenths(Motor2_Speed));
 }

@@ -61,6 +61,18 @@ void App_MenuInitData(void);
 /* 循迹实时阶段仅处理菜单按键，不执行显示数据换算和 OLED 刷新。 */
 void App_MenuInputRun(void);
 
+/* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
+void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
+
+/* 退出速度闭环并清空 PID 状态，不改写当前电机 PWM。 */
+void App_VehicleClosedLoopDisable(void);
+
+/* 退出速度闭环、清空 PID 状态并立即停车。 */
+void App_VehicleClosedLoopStop(void);
+
+/* 获取左右轮闭环目标的平均值，供低频菜单刷新使用。 */
+float App_VehicleClosedLoopGetAverageTarget(void);
+
 /* 将最近一次按键 ADC 值同步到菜单显示数据中。 */
 /**
  * @brief 执行 App  Menu Set Key Adc 功能。
