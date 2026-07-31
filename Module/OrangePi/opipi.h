@@ -21,6 +21,8 @@
 
 void OPi_Init(void);
 void OPi_SendCmd(uint8_t code);
+/* Send 0xAA followed by a little-endian IEEE754 float ps value. */
+void OPi_SendPsValue(float ps);
 uint8_t OPi_ReadByte(uint8_t *byte);
 void OPi_FlushRx(void);
 

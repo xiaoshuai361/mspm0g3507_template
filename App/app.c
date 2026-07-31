@@ -15,6 +15,7 @@
 #include "menu_test.h"
 #include "motor.h"
 #include "Encoder.h"
+#include "Encoder_XZ.h"
 #include "oled.h"
 #include "opipi.h"
 #include "uart.h"
@@ -137,6 +138,12 @@ static App_LineLapContext task3LineContext = {
     .startKeyArmed = 1U, .stopOnDist = 1U };
 static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
+static uint8_t task5ResetPending = 1U;
+
+enum {
+    TASK5_PS_MIN_TENTHS = -120,
+    TASK5_PS_MAX_TENTHS = 120
+};
 
 static void App_LineLapReset(App_LineLapContext *context)
 {
@@ -150,10 +157,26 @@ static void App_LineLapReset(App_LineLapContext *context)
                                &context->crossConfirm);
 }
 
+static void App_LineLapRunWithStartKey(App_LineLapContext *context,
+                                       const LineTrace_ControlConfig *config,
+                                       uint8_t taskNumber, int16_t brakePwm,
+                                       uint16_t brakeDurationMs,
+                                       Key5D_Key startKey);
+
 static void App_LineLapRun(App_LineLapContext *context,
                            const LineTrace_ControlConfig *config,
                            uint8_t taskNumber, int16_t brakePwm,
                            uint16_t brakeDurationMs)
+{
+    App_LineLapRunWithStartKey(context, config, taskNumber, brakePwm,
+                               brakeDurationMs, KEY5D_KEY_RIGHT);
+}
+
+static void App_LineLapRunWithStartKey(App_LineLapContext *context,
+                                       const LineTrace_ControlConfig *config,
+                                       uint8_t taskNumber, int16_t brakePwm,
+                                       uint16_t brakeDurationMs,
+                                       Key5D_Key startKey)
 {
     const uint32_t now = BSP_Delay_GetTick();
     const Key5D_Key stableKey = App_InputGetStableKey();
@@ -163,7 +186,7 @@ static void App_LineLapRun(App_LineLapContext *context,
     int16_t errorTenths;
     LineTrace_ControlOutput controlOutput;
 
-    if (stableKey != KEY5D_KEY_RIGHT) {
+    if (stableKey != startKey) {
         context->startKeyArmed = 1U;
     }
     if (context->state == APP_LINE_LAP_BRAKING) {
@@ -178,7 +201,7 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
     if ((context->state != APP_LINE_LAP_TRACKING) &&
         (context->startKeyArmed != 0U) &&
-        (stableKey == KEY5D_KEY_RIGHT)) {
+        (stableKey == startKey)) {
         char message[20];
 
         context->startKeyArmed = 0U;
@@ -275,6 +298,46 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
 
     Set_Speed((int)controlOutput.leftPwm, (int)controlOutput.rightPwm);
+}
+
+static void App_Task5FormatTenths(char *buffer, uint32_t size,
+                                  int16_t valueTenths)
+{
+    int16_t whole;
+    int16_t fraction;
+    char sign = '+';
+
+    if (valueTenths < 0) {
+        sign = '-';
+        valueTenths = (int16_t)-valueTenths;
+    }
+    whole = (int16_t)(valueTenths / 10);
+    fraction = (int16_t)(valueTenths % 10);
+
+    (void)snprintf(buffer, size, "%c%d.%d", sign,
+                   (int)whole, (int)fraction);
+}
+
+static void App_Task5RenderPsSelect(int16_t psTenths)
+{
+    char line[22];
+
+    OLED_ClearBuffer();
+    OLED_ShowString(0U, 0U, "TASK5 SET PS", 8U, 1U);
+    App_Task5FormatTenths(line, sizeof(line), psTenths);
+    OLED_ShowString(0U, 18U, "PS:", 16U, 1U);
+    OLED_ShowString(32U, 18U, line, 16U, 1U);
+    OLED_ShowString(0U, 42U, "ENC -12.0..+12.0", 8U, 1U);
+    OLED_ShowString(0U, 54U, "RIGHT OK", 8U, 1U);
+    OLED_Refresh();
+}
+
+static void App_Task5RenderStatus(const char *status)
+{
+    OLED_ClearBuffer();
+    OLED_ShowString(0U, 0U, "TASK5", 16U, 1U);
+    OLED_ShowString(0U, 24U, status, 8U, 1U);
+    OLED_Refresh();
 }
 
 /* Task 1：1100 PWM 竞速档 + 遇A停车。 */
@@ -419,37 +482,81 @@ void App_Task4Run(void)
 }
 
 /*
- * Task 5 —— 题6：单圈+经过A（香橙派协议，不记录初始位置直接发车）
- * 发送AA 06 → 等待AA 00 → 循迹 → 停车发AA 0F → 等待AA 00
+ * Task 5 —— 题6：设定小球保持位置后发车
+ * 编码器选择ps → 发送AA+float(ps) → 等待AA 00 → 右键发车 → 停车发AA 0F → 等待AA 00
  */
 void App_Task5Run(void)
 {
-    enum { T5_SEND, T5_WAIT, T5_READY, T5_TRACK, T5_FINISH, T5_DONE };
-    static uint8_t state = T5_SEND;
-    static uint8_t lastActive;
+    enum { T5_SELECT_PS, T5_WAIT_PS_ACK, T5_READY, T5_TRACK, T5_FINISH, T5_DONE };
+    static uint8_t state = T5_SELECT_PS;
+    static uint8_t rightKeyArmed;
+    static int16_t psTenths;
+    static int16_t lastDisplayPsTenths = 32767;
+    static uint32_t lastDisplayTick;
 
-    if (lastActive != 5U) {
-        lastActive = 5U; state = T5_SEND; OPi_FlushRx();
+    if (task5ResetPending != 0U) {
+        task5ResetPending = 0U;
+        state = T5_SELECT_PS;
+        rightKeyArmed = 0U;
+        psTenths = 0;
+        lastDisplayPsTenths = 32767;
+        lastDisplayTick = 0U;
+        Encoder_XZ_SetValue(0);
+        Encoder_XZ_Enable();
+        OPi_FlushRx();
         App_LineLapReset(&task5LineContext);
     }
 
     switch (state) {
-    case T5_SEND:
-        OPi_SendCmd(OPI_CMD_TASK6);
-        state = T5_WAIT;
-        break;
-    case T5_WAIT: {
-        uint8_t b;
-        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
-            App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T5_READY;
+    case T5_SELECT_PS: {
+        const uint32_t now = BSP_Delay_GetTick();
+        const Key5D_Key stableKey = App_InputGetStableKey();
+        char message[40];
+
         Set_Speed(0, 0);
+        psTenths = (int16_t)Encoder_XZ_GetClampedValue(
+            TASK5_PS_MIN_TENTHS, TASK5_PS_MAX_TENTHS);
+
+        if ((psTenths != lastDisplayPsTenths) ||
+            ((uint32_t)(now - lastDisplayTick) >= 100U)) {
+            lastDisplayPsTenths = psTenths;
+            lastDisplayTick = now;
+            App_Task5RenderPsSelect(psTenths);
+        }
+
+        if (stableKey != KEY5D_KEY_RIGHT) {
+            rightKeyArmed = 1U;
+        } else if (rightKeyArmed != 0U) {
+            rightKeyArmed = 0U;
+            OPi_FlushRx();
+            OPi_SendPsValue((float)psTenths / 10.0f);
+            App_Task5FormatTenths(message, sizeof(message), psTenths);
+            uart0_send_string("T5 PS=");
+            uart0_send_string(message);
+            uart0_send_string("\r\n");
+            App_Task5RenderStatus("WAIT OPI ACK");
+            state = T5_WAIT_PS_ACK;
+        }
+        break; }
+    case T5_WAIT_PS_ACK: {
+        uint8_t b;
+        Set_Speed(0, 0);
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
+            App_InputGetStableKey() != KEY5D_KEY_RIGHT) {
+            App_Task5RenderStatus("RIGHT TO START");
+            state = T5_READY;
+        }
         break; }
     case T5_READY:
-        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        App_LineLapRunWithStartKey(&task5LineContext,
+                                   &task2StableControlConfig, 5U, 0, 0U,
+                                   KEY5D_KEY_RIGHT);
         if (task5LineContext.state == APP_LINE_LAP_TRACKING) state = T5_TRACK;
         break;
     case T5_TRACK:
-        App_LineLapRun(&task5LineContext, &task2StableControlConfig, 5U, 0, 0U);
+        App_LineLapRunWithStartKey(&task5LineContext,
+                                   &task2StableControlConfig, 5U, 0, 0U,
+                                   KEY5D_KEY_RIGHT);
         if (task5LineContext.state == APP_LINE_LAP_STOPPED) state = T5_FINISH;
         break;
     case T5_FINISH: {
@@ -459,11 +566,7 @@ void App_Task5Run(void)
         if (OPi_ReadByte(&b) && b == OPI_ACK_OK) { sent = 0U; state = T5_DONE; }
         break; }
     case T5_DONE: {
-        Key5D_Event ev = KEY5D_EVENT_NONE;
-        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
-            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
-            state = T5_SEND; OPi_FlushRx(); App_LineLapReset(&task5LineContext);
-        }
+        Set_Speed(0, 0);
         break; }
     default: break;
     }
@@ -484,6 +587,9 @@ void App_TasksRun(void)
         App_LineLapReset(&task3LineContext);
         App_LineLapReset(&task4LineContext);
         App_LineLapReset(&task5LineContext);
+        if (g_active_task == 5U) {
+            task5ResetPending = 1U;
+        }
         previousTask = g_active_task;
     }
 

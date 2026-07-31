@@ -4,7 +4,7 @@
 #include "stdio.h"
 #include "ti_msp_dl_config.h"
 
-extern int32_t Encoder_XZ_Value; /**< Encoder_XZ_Value 全局状态或配置变量。 */
+extern volatile int32_t Encoder_XZ_Value; /**< Encoder_XZ_Value 全局状态或配置变量。 */
 
 /**
  * @brief 执行 Encoder  X Z  Disable 功能。
@@ -16,6 +16,9 @@ void Encoder_XZ_Disable();
 void Encoder_XZ_Enable();
 
 void Encoder_XZ_Set(bool state);
+int32_t Encoder_XZ_GetValue(void);
+void Encoder_XZ_SetValue(int32_t value);
+int32_t Encoder_XZ_GetClampedValue(int32_t minValue, int32_t maxValue);
 /**
  * @brief 执行 Encoder  X Z toggle 功能。
  * @param 无。
