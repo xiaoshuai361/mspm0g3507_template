@@ -136,33 +136,33 @@ void App_VehicleControlRun(void);
 uint8_t App_VehicleNormalizeBluetoothCommand(uint8_t rawCommand);
 
 /**
- * @brief 执行菜单选择的 Task 1 逻辑。
+ * @brief 执行菜单选择的 Task 2F/2L 逻辑。
  * @param 无。
- * @note 用户任务接口，保持非阻塞；在菜单选择 Task 1 后由 App_TasksRun() 周期调用。
+ * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 2。
  * @retval 无。
  */
 void App_Task1Run(void);
 
 /**
- * @brief 执行菜单选择的 Task 2 逻辑。
+ * @brief 执行菜单选择的 Task 3 逻辑。
  * @param 无。
- * @note 用户任务接口，保持非阻塞；在菜单选择 Task 2 后由 App_TasksRun() 周期调用。
+ * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 3。
  * @retval 无。
  */
 void App_Task2Run(void);
 
 /**
- * @brief 执行菜单选择的 Task 3 逻辑。
+ * @brief 执行菜单选择的 Task 4 逻辑。
  * @param 无。
- * @note 用户任务接口，保持非阻塞；在菜单选择 Task 3 后由 App_TasksRun() 周期调用。
+ * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 4。
  * @retval 无。
  */
 void App_Task3Run(void);
 
 /**
- * @brief 执行菜单选择的 Task 4 逻辑。
+ * @brief 执行菜单选择的 Task 5 逻辑。
  * @param 无。
- * @note 用户任务接口，保持非阻塞；在菜单选择 Task 4 后由 App_TasksRun() 周期调用。
+ * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 5。
  * @retval 无。
  */
 void App_Task4Run(void);
@@ -170,7 +170,7 @@ void App_Task4Run(void);
 void App_Task5Run(void);
 
 /**
- * @brief 根据菜单当前任务编号分发执行 Task 1~5。
+ * @brief 根据菜单选择分发执行OLED Task 2~6。
  * @param 无。
  * @note 在 App_Run() 中周期调用；未选择任务时不执行任何任务逻辑。
  * @retval 无。

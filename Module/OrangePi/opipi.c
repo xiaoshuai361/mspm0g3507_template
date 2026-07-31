@@ -1,8 +1,13 @@
 #include "opipi.h"
 #include "ti_msp_dl_config.h"
 
-static volatile uint8_t opiRxFlag;
-static volatile uint8_t opiRxData;
+#define OPI_RX_QUEUE_SIZE (8U)
+#define OPI_RX_QUEUE_MASK (OPI_RX_QUEUE_SIZE - 1U)
+
+static volatile uint8_t opiRxQueue[OPI_RX_QUEUE_SIZE];
+static volatile uint8_t opiRxHead;
+static volatile uint8_t opiRxTail;
+static volatile uint8_t opiRxHasHeader;
 
 static void OPi_SendByte(uint8_t data)
 {
@@ -12,19 +17,22 @@ static void OPi_SendByte(uint8_t data)
 
 void OPi_Init(void)
 {
-    /* 用蓝牙模块的初始化流程（已验证的UART2配置），然后改波特率 */
-    extern void uart2_init(void);
-    uart2_init();
+    NVIC_DisableIRQ(UART_2_INST_INT_IRQN);
 
     DL_UART_Main_disable(UART_2_INST);
+    /* UART2时钟32MHz、16倍过采样，对应115200 baud。 */
     DL_UART_Main_setBaudRateDivisor(UART_2_INST, 17U, 23U);
     DL_UART_Main_enable(UART_2_INST);
 
     while (!DL_UART_Main_isRXFIFOEmpty(UART_2_INST)) {
         (void)DL_UART_Main_receiveData(UART_2_INST);
     }
-    opiRxFlag = 0U;
-    opiRxData = 0U;
+    opiRxHead = 0U;
+    opiRxTail = 0U;
+    opiRxHasHeader = 0U;
+    DL_UART_clearInterruptStatus(UART_2_INST, UART_2_INST->CPU_INT.RIS);
+    NVIC_ClearPendingIRQ(UART_2_INST_INT_IRQN);
+    NVIC_EnableIRQ(UART_2_INST_INT_IRQN);
 }
 
 void OPi_SendCmd(uint8_t code)
@@ -33,35 +41,45 @@ void OPi_SendCmd(uint8_t code)
     OPi_SendByte(code);
 }
 
-void OPi_SendPsValue(float ps)
+void OPi_SendPosition(int8_t positionTenthsCm)
 {
-    union {
-        float value;
-        uint8_t bytes[sizeof(float)];
-    } payload;
-    uint32_t i;
-
-    payload.value = ps;
     OPi_SendByte(OPI_FRAME_HEAD);
-    for (i = 0U; i < (uint32_t)sizeof(payload.bytes); i++) {
-        OPi_SendByte(payload.bytes[i]);
-    }
+    OPi_SendByte(OPI_CMD_POSITION);
+    OPi_SendByte((uint8_t)positionTenthsCm);
 }
 
-uint8_t OPi_ReadByte(uint8_t *byte)
+uint8_t OPi_ReadFrame(uint8_t *code)
 {
-    if (opiRxFlag == 0U) return 0U;
-    *byte = opiRxData;
-    opiRxFlag = 0U;
-    return 1U;
+    uint8_t hasFrame = 0U;
+    uint32_t primask;
+
+    if (code == 0) {
+        return 0U;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (opiRxTail != opiRxHead) {
+        *code = opiRxQueue[opiRxTail];
+        opiRxTail = (uint8_t)((opiRxTail + 1U) & OPI_RX_QUEUE_MASK);
+        hasFrame = 1U;
+    }
+    __set_PRIMASK(primask);
+    return hasFrame;
 }
 
 void OPi_FlushRx(void)
 {
-    opiRxFlag = 0U;
+    uint32_t primask = __get_PRIMASK();
+
+    __disable_irq();
+    opiRxHead = 0U;
+    opiRxTail = 0U;
+    opiRxHasHeader = 0U;
     while (!DL_UART_Main_isRXFIFOEmpty(UART_2_INST)) {
         (void)DL_UART_Main_receiveData(UART_2_INST);
     }
+    __set_PRIMASK(primask);
 }
 
 void UART2_IRQHandler(void)
@@ -72,10 +90,23 @@ void UART2_IRQHandler(void)
         while (DL_UART_Main_isRXFIFOEmpty(UART_2_INST) == false)
         {
             const uint8_t data = DL_UART_Main_receiveData(UART_2_INST);
-            if (data != (uint8_t)'\r' && data != (uint8_t)'\n')
-            {
-                opiRxData = data;
-                opiRxFlag = 1U;
+
+            if (opiRxHasHeader == 0U) {
+                if (data == OPI_FRAME_HEAD) {
+                    opiRxHasHeader = 1U;
+                }
+            } else if (data == OPI_FRAME_HEAD) {
+                /* 连续帧头时保留最后一个帧头，快速重新同步。 */
+                opiRxHasHeader = 1U;
+            } else {
+                const uint8_t nextHead = (uint8_t)(
+                    (opiRxHead + 1U) & OPI_RX_QUEUE_MASK);
+
+                if (nextHead != opiRxTail) {
+                    opiRxQueue[opiRxHead] = data;
+                    opiRxHead = nextHead;
+                }
+                opiRxHasHeader = 0U;
             }
         }
         break;

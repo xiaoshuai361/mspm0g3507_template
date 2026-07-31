@@ -304,9 +304,9 @@ float App_VehicleClosedLoopGetAverageTarget(void)
 }
 
 /**
- * @brief 初始化蓝牙、编码器和车辆控制状态。
+ * @brief 初始化编码器和车辆控制状态。
  * @param 无。
- * @note 首次调用完成 UART2、编码器和 PID 停车初始化；后续调用直接返回。
+ * @note UART2由香橙派协议独占；这里只初始化编码器和PID状态。
  * @retval 无。
  */
 void App_VehicleInit(void)
@@ -317,8 +317,6 @@ void App_VehicleInit(void)
     }
 
     uart0_send_string("Vehicle init begin\r\n");
-    uart2_init();
-    uart0_send_string("Vehicle uart2 OK\r\n");
     Encoder_Init();
     uart0_send_string("Vehicle encoder OK\r\n");
     App_VehicleClosedLoopStop();
@@ -414,7 +412,7 @@ void App_BluetoothRun(void)
 /**
  * @brief 兼容旧工程的蓝牙任务函数名。
  * @param 无。
- * @note 新代码推荐直接调用 App_BluetoothRun()，保留本函数避免旧模板调用失效。
+ * @note UART2现由香橙派协议独占，仅保留本函数避免旧模板链接失败。
  * @retval 无。
  */
 void bluetooth_work(void)
@@ -566,13 +564,12 @@ static void App_VehicleDebugRun(void)
 /**
  * @brief 车辆总任务调度入口。
  * @param 无。
- * @note 在 App_Run 中保留本调用即可启用蓝牙命令、灰度循迹、编码器测速和 PID 闭环。
+ * @note UART2由香橙派协议独占，此入口不再轮询蓝牙命令。
  * @retval 无。
  */
 void App_VehicleRun(void)
 {
     App_VehicleInit();
-    App_BluetoothRun();
     App_LineTraceRun();
     App_VehicleControlRun();
     App_VehicleDebugRun();

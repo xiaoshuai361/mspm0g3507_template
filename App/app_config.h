@@ -31,9 +31,10 @@
 #define APP_TASK1_BRAKE_PWM (1000)          /**< Task 1停车线触发后的反向制动 PWM。 */
 #define APP_TASK1_BRAKE_DURATION_MS (190U) /**< Task 1反向制动持续时间。 */
 #define APP_TASK1_BRAKE_DELAY_PULSES (0U)  /**< 检测停车线后继续前进的左右编码器绝对增量之和；0=立即制动。 */
+#define APP_TASK56_SLOW_STOP_DURATION_MS (800U) /**< Task 5/6扫到停车线后的闭环缓停时间。 */
 
 #define APP_VEHICLE_DEFAULT_SPEED (150.0f)  /**< f62ded5 整定后的车辆默认目标速度。 */
-#define APP_TASK1_LOW_SPEED (100.0f)        /**< Task 1L 闭环速度换算基准。 */
+#define APP_TASK1_LOW_SPEED (100.0f)        /**< OLED Task 2L闭环速度换算基准。 */
 #define APP_VEHICLE_LINE_PERIOD_MS (10U)    /**< 灰度循迹读取周期，单位 ms；灰度读取轻，保留快速响应。 */
 #define APP_LINE_OUTER_FILTER_FRAMES (1U)   /**< D1/D8最外侧灰度连续稳定帧数；1=不滤波，3约为30ms。 */
 #define APP_VEHICLE_SPEED_PERIOD_MS (20U)   /**< 编码器测速周期，单位 ms；降低抖动和 CPU 占用。 */

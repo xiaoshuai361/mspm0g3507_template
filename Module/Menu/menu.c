@@ -13,10 +13,10 @@ static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
 };
 
 static const char *const taskItems[MENU_TASK_ITEM_COUNT] = {
-    "Task 1F", "Task 1L", "Task 2", "Task 3", "Task 4", "Task 5"
+    "Task 2F", "Task 2L", "Task 3", "Task 4", "Task 5", "Task 6"
 };
 
-/* Task 1L uses code 6 so the existing Task 2-5 IDs stay unchanged. */
+/* Task 2L uses code 6 so the existing internal task IDs stay unchanged. */
 static const uint8_t taskCodes[MENU_TASK_ITEM_COUNT] = {
     1U, 6U, 2U, 3U, 4U, 5U
 };

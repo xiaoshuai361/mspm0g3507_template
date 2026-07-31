@@ -14,7 +14,7 @@
                                          LINE_TRACE_OUTER_LEFT_MASK))
 
 static const int16_t lineTraceWeightsTenths[8] = {
-    32, 29, 12, 5, -5, -12, -29, -32
+    35, 25, 15, 5, -5, -15, -25, -35
 }; /**< bit0~bit7 的位置权重，单位 0.1 路间距；右正左负。 */
 
 /**
@@ -248,7 +248,6 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
     int16_t desiredBase;
     int16_t correction;
     int16_t correctionLimit;
-    int16_t steeringGain;
     int16_t leftBias;
     int16_t rightTurnBoost;
 
@@ -344,12 +343,7 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
         controller->basePwm, desiredBase,
         config->rampUpStep, config->rampDownStep);
 
-    steeringGain = config->steeringKp;
-    if (LineTrace_AbsInt16(steeringError) >=
-        config->edgeSteeringThreshold) {
-        steeringGain = config->edgeSteeringKp;
-    }
-    correction = (int16_t)(steeringError * steeringGain);
+    correction = (int16_t)(steeringError * config->steeringKp);
     correctionLimit = config->steeringMax;
 
     /* 两轮保持正转，同时允许配重增加后使用更强的40%差速纠偏。 */

@@ -61,8 +61,6 @@ static const LineTrace_ControlConfig lineControlTestConfig = {
     .curveSlowdownGain = 8,
     .slowdownEntryError = 10,
     .steeringKp = 4,
-    .edgeSteeringKp = 22,
-    .edgeSteeringThreshold = 6,
     .steeringMax = 480,
     .leftPwmBias = 50,
     .rightTurnBoost = 135,
@@ -84,8 +82,6 @@ static const LineTrace_ControlConfig lineControlStableTestConfig = {
     .curveSlowdownGain = 1,
     .slowdownEntryError = 8,
     .steeringKp = 4,
-    .edgeSteeringKp = 14,
-    .edgeSteeringThreshold = 6,
     .steeringMax = 240,
     .leftPwmBias = 39,
     .rightTurnBoost = 70,
@@ -236,7 +232,7 @@ static uint32_t LineTrace_TestController(void)
         failures++;
     }
 
-    /* D3/D6 中等偏差需在两帧内进入半圆弯道增强差速。 */
+    /* D3/D6 中等偏差保持线性纠偏，不在阈值处切换增益。 */
     LineTrace_ControllerReset(&curveController);
     curveController.basePwm = 1100;
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
@@ -250,9 +246,9 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                              1U, 15, &output);
     if ((output.filteredError != 11) ||
-        (output.correction != 132) ||
+        (output.correction != 24) ||
         (output.basePwm != 1100) ||
-        (output.leftPwm != 1322) || (output.rightPwm != 968)) {
+        (output.leftPwm != 1181) || (output.rightPwm != 1076)) {
         failures++;
     }
     for (frame = 0U; frame < 3U; frame++) {
@@ -260,8 +256,8 @@ static uint32_t LineTrace_TestController(void)
                                  1U, 15, &output);
     }
     if ((output.basePwm != 1068) ||
-        (output.correction != 198) ||
-        (output.leftPwm != 1376) || (output.rightPwm != 870)) {
+        (output.correction != 36) ||
+        (output.leftPwm != 1163) || (output.rightPwm != 1032)) {
         failures++;
     }
 
@@ -269,8 +265,8 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              1U, 35, &output);
     if ((output.filteredError != 17) ||
-        (output.correction != 264) ||
-        (output.leftPwm != 1495) || (output.rightPwm != 836)) {
+        (output.correction != 48) ||
+        (output.leftPwm != 1212) || (output.rightPwm != 1052)) {
         failures++;
     }
 
@@ -293,7 +289,7 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              0U, 0, &output);
     if ((output.shouldStop != 0U) ||
-        (output.leftPwm != 712) || (output.rightPwm != 1456)) {
+        (output.leftPwm != 1036) || (output.rightPwm != 1132)) {
         failures++;
     }
 
@@ -308,8 +304,8 @@ static uint32_t LineTrace_TestController(void)
         }
     }
     if ((output.basePwm != 700) ||
-        (output.correction != -280) ||
-        (output.leftPwm != 451) || (output.rightPwm != 980)) {
+        (output.correction != -140) ||
+        (output.leftPwm != 591) || (output.rightPwm != 840)) {
         failures++;
     }
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
@@ -344,8 +340,8 @@ static uint32_t LineTrace_TestStableController(void)
                              1U, 15, &output);
     if ((output.filteredError != 11) ||
         (output.basePwm != 702) ||
-        (output.correction != 84) ||
-        (output.leftPwm != 849) || (output.rightPwm != 618)) {
+        (output.correction != 24) ||
+        (output.leftPwm != 772) || (output.rightPwm != 678)) {
         failures++;
     }
 
@@ -359,13 +355,13 @@ static uint32_t LineTrace_TestSteeringSlew(void)
     LineTrace_Controller controller;
     LineTrace_ControlOutput output;
 
-    config.steeringSlewStep = 50;
+    config.steeringSlewStep = 20;
     LineTrace_ControllerReset(&controller);
     controller.basePwm = 1100;
 
     LineTrace_ControllerStep(&controller, &config, 1U, 35, &output);
-    if ((output.correction != 50) ||
-        (output.leftPwm != 1215) || (output.rightPwm != 1050)) {
+    if ((output.correction != 20) ||
+        (output.leftPwm != 1176) || (output.rightPwm != 1080)) {
         failures++;
     }
 
