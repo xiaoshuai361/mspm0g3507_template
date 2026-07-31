@@ -26,10 +26,10 @@
 
 /* 赛道任务速度档：题2追求20s内完赛，题5/6带球时保留原稳定速度。 */
 #define APP_TASK1_LINE_CRUISE_PWM (1100) /**< 题2单圈循迹直道竞速 PWM。 */
-#define APP_STABLE_LINE_CRUISE_PWM (600) /**< Task 2及低速负载任务的稳定巡航 PWM。 */
+#define APP_STABLE_LINE_CRUISE_PWM (702) /**< Task 2及低速负载任务的稳定巡航 PWM。 */
 #define APP_BALL_LINE_CRUISE_PWM APP_STABLE_LINE_CRUISE_PWM /**< 题5/6钢球稳定任务速度。 */
-#define APP_TASK1_BRAKE_PWM (700)         /**< Task 1停车线触发后的反向制动 PWM。 */
-#define APP_TASK1_BRAKE_DURATION_MS (90U) /**< Task 1反向制动持续时间。 */
+#define APP_TASK1_BRAKE_PWM (950)          /**< Task 1停车线触发后的反向制动 PWM。 */
+#define APP_TASK1_BRAKE_DURATION_MS (170U) /**< Task 1反向制动持续时间。 */
 
 #define APP_VEHICLE_DEFAULT_SPEED (50.0f)   /**< 车辆默认目标速度。 */
 #define APP_VEHICLE_LINE_PERIOD_MS (10U)    /**< 灰度循迹读取周期，单位 ms；灰度读取轻，保留快速响应。 */

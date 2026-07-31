@@ -57,37 +57,45 @@ static const LineTrace_ControlConfig lineControlTestConfig = {
     .cruisePwm = 1100,
     .lostPwm = 700,
     .rampUpStep = 20,
-    .rampDownStep = 35,
+    .rampDownStep = 20,
     .curveSlowdownGain = 8,
+    .slowdownEntryError = 10,
     .steeringKp = 4,
-    .edgeSteeringKp = 20,
+    .edgeSteeringKp = 22,
     .edgeSteeringThreshold = 6,
-    .steeringMax = 420,
+    .steeringMax = 480,
+    .leftPwmBias = 50,
+    .rightTurnBoost = 120,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
     .lostSearchStartError = 18,
     .lostSearchStepFrames = 2U,
     .lostHoldFrames = 1U,
+    .slowdownConfirmFrames = 3U,
     .lostStopFrames = 150U,
 };
 
 static const LineTrace_ControlConfig lineControlStableTestConfig = {
-    .cruisePwm = 600,
-    .lostPwm = 500,
-    .rampUpStep = 15,
-    .rampDownStep = 10,
+    .cruisePwm = 702,
+    .lostPwm = 584,
+    .rampUpStep = 19,
+    .rampDownStep = 11,
     .curveSlowdownGain = 1,
+    .slowdownEntryError = 8,
     .steeringKp = 4,
-    .edgeSteeringKp = 10,
+    .edgeSteeringKp = 14,
     .edgeSteeringThreshold = 6,
-    .steeringMax = 200,
+    .steeringMax = 240,
+    .leftPwmBias = 39,
+    .rightTurnBoost = 60,
     .centerDeadband = 5,
     .fastErrorThreshold = 15,
     .fastDeltaThreshold = 12,
     .lostSearchStartError = 16,
     .lostSearchStepFrames = 3U,
     .lostHoldFrames = 2U,
+    .slowdownConfirmFrames = 2U,
     .lostStopFrames = 150U,
 };
 
@@ -97,31 +105,15 @@ static uint32_t LineTrace_TestCrossLine(void)
     uint16_t lockoutFrames = 0U;
     uint8_t confirmCount = 0U;
 
-    /* 外侧 D1~D4 同时扫到赛道是弯道结束标志，不应触发停车。 */
+    /* Four active sensors are a normal track shape, not a stop line. */
     if (LineTrace_DetectCrossLine(0xF0U, 4U,
                                   &lockoutFrames, &confirmCount)
         != CROSS_LINE_NONE) {
         failures++;
     }
 
-    /* 另一侧 D5~D8 同时有效也不能触发停车。 */
-    if (LineTrace_DetectCrossLine(0x0FU, 4U,
-                                  &lockoutFrames, &confirmCount)
-        != CROSS_LINE_NONE) {
-        failures++;
-    }
-
-    /* 中间 D3~D5 三路为黑，第一帧只进入确认。 */
-    if (LineTrace_DetectCrossLine(0xE3U, 3U,
-                                  &lockoutFrames, &confirmCount)
-        != CROSS_LINE_NONE) {
-        failures++;
-    }
-    if (confirmCount != 1U) {
-        failures++;
-    }
-    /* 下一帧左偏到 D4~D7 四路，仍应连续确认并停车。 */
-    if (LineTrace_DetectCrossLine(0x87U, 4U,
+    /* Any three active sensors stop immediately; adjacency is irrelevant. */
+    if (LineTrace_DetectCrossLine(0x76U, 3U,
                                   &lockoutFrames, &confirmCount)
         != CROSS_LINE_DETECTED) {
         failures++;
@@ -129,14 +121,23 @@ static uint32_t LineTrace_TestCrossLine(void)
 
     lockoutFrames = 0U;
     confirmCount = 0U;
-    /* 非连续的中部三路不能误判为停车线。 */
-    if (LineTrace_DetectCrossLine(0xD3U, 3U,
+    /* A regular contiguous three-sensor stop line is also immediate. */
+    if (LineTrace_DetectCrossLine(0xE3U, 3U,
+                                  &lockoutFrames, &confirmCount)
+        != CROSS_LINE_DETECTED) {
+        failures++;
+    }
+
+    lockoutFrames = 0U;
+    confirmCount = 0U;
+    /* Two active sensors keep tracking. */
+    if (LineTrace_DetectCrossLine(0xE7U, 2U,
                                   &lockoutFrames, &confirmCount)
         != CROSS_LINE_NONE) {
         failures++;
     }
 
-    /* 锁定期必须压制起步停车线，且按控制帧递减。 */
+    /* Startup lockout still suppresses a three-sensor reading. */
     lockoutFrames = 2U;
     confirmCount = 0U;
     if (LineTrace_DetectCrossLine(0xC7U, 3U,
@@ -171,7 +172,7 @@ static uint32_t LineTrace_TestController(void)
         LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                                  1U, 0, &output);
     }
-    if ((output.leftPwm != 1100) || (output.rightPwm != 1100)) {
+    if ((output.leftPwm != 1150) || (output.rightPwm != 1100)) {
         failures++;
     }
 
@@ -180,45 +181,45 @@ static uint32_t LineTrace_TestController(void)
     curveController.basePwm = 1100;
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                              1U, 15, &output);
-    if ((output.filteredError != 11) ||
-        (output.correction != 120) ||
-        (output.basePwm != 1065) ||
-        (output.leftPwm != 1185) || (output.rightPwm != 945)) {
+    if ((output.filteredError != 7) ||
+        (output.correction != 8) ||
+        (output.basePwm != 1100) ||
+        (output.leftPwm != 1160) || (output.rightPwm != 1092)) {
         failures++;
     }
     LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                              1U, 15, &output);
-    if ((output.filteredError != 14) ||
-        (output.correction != 180) ||
-        (output.basePwm != 1030) ||
-        (output.leftPwm != 1210) || (output.rightPwm != 850)) {
+    if ((output.filteredError != 11) ||
+        (output.correction != 132) ||
+        (output.basePwm != 1100) ||
+        (output.leftPwm != 1318) || (output.rightPwm != 968)) {
         failures++;
     }
     for (frame = 0U; frame < 3U; frame++) {
         LineTrace_ControllerStep(&curveController, &lineControlTestConfig,
                                  1U, 15, &output);
     }
-    if ((output.basePwm != 988) ||
-        (output.correction != 180) ||
-        (output.leftPwm != 1168) || (output.rightPwm != 808)) {
+    if ((output.basePwm != 1068) ||
+        (output.correction != 198) ||
+        (output.leftPwm != 1369) || (output.rightPwm != 870)) {
         failures++;
     }
 
     /* 最外侧偏差首帧必须立即产生差速，且两轮保持正向。 */
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              1U, 35, &output);
-    if ((output.filteredError != 26) ||
-        (output.correction != 420) ||
-        (output.leftPwm != 1485) || (output.rightPwm != 645)) {
+    if ((output.filteredError != 17) ||
+        (output.correction != 264) ||
+        (output.leftPwm != 1486) || (output.rightPwm != 836)) {
         failures++;
     }
 
-    /* 从右边缘跳到左边缘时，首帧纠偏方向必须同步翻转。 */
+    /* A large side change is damped to avoid an abrupt full-scale reversal. */
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              1U, -35, &output);
-    if ((output.filteredError != -19) ||
-        (output.correction != -280) ||
-        (output.leftPwm != 750) || (output.rightPwm != 1310)) {
+    if ((output.filteredError != -9) ||
+        (output.correction != -16) ||
+        (output.leftPwm != 1134) || (output.rightPwm != 1116)) {
         failures++;
     }
 
@@ -226,13 +227,13 @@ static uint32_t LineTrace_TestController(void)
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              0U, 0, &output);
     if ((output.shouldStop != 0U) ||
-        (output.leftPwm != 715) || (output.rightPwm != 1275)) {
+        (output.leftPwm != 1113) || (output.rightPwm != 1096)) {
         failures++;
     }
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
                              0U, 0, &output);
     if ((output.shouldStop != 0U) ||
-        (output.leftPwm != 600) || (output.rightPwm != 1320)) {
+        (output.leftPwm != 712) || (output.rightPwm != 1456)) {
         failures++;
     }
 
@@ -248,7 +249,7 @@ static uint32_t LineTrace_TestController(void)
     }
     if ((output.basePwm != 700) ||
         (output.correction != -280) ||
-        (output.leftPwm != 420) || (output.rightPwm != 980)) {
+        (output.leftPwm != 451) || (output.rightPwm != 980)) {
         failures++;
     }
     LineTrace_ControllerStep(&controller, &lineControlTestConfig,
@@ -272,8 +273,8 @@ static uint32_t LineTrace_TestStableController(void)
         LineTrace_ControllerStep(&controller, &lineControlStableTestConfig,
                                  1U, 0, &output);
     }
-    if ((output.basePwm != 600) ||
-        (output.leftPwm != 600) || (output.rightPwm != 600)) {
+    if ((output.basePwm != 702) ||
+        (output.leftPwm != 741) || (output.rightPwm != 702)) {
         failures++;
     }
 
@@ -281,10 +282,10 @@ static uint32_t LineTrace_TestStableController(void)
                              1U, 15, &output);
     LineTrace_ControllerStep(&controller, &lineControlStableTestConfig,
                              1U, 15, &output);
-    if ((output.filteredError != 14) ||
-        (output.basePwm != 586) ||
-        (output.correction != 90) ||
-        (output.leftPwm != 676) || (output.rightPwm != 496)) {
+    if ((output.filteredError != 11) ||
+        (output.basePwm != 702) ||
+        (output.correction != 84) ||
+        (output.leftPwm != 846) || (output.rightPwm != 618)) {
         failures++;
     }
 

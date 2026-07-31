@@ -71,6 +71,14 @@ void Menu_HandleInput(Menu_State *state, Menu_Input input)
         return;
     }
 
+    if ((state->page == MENU_PAGE_TIMER) &&
+        (input == MENU_INPUT_BACK)) {
+        state->page = MENU_PAGE_TASKS;
+        state->activeTask = 0U;
+        state->dirty = true;
+        return;
+    }
+
     if (input == MENU_INPUT_BACK) {
         state->page = MENU_PAGE_MAIN;
         state->dirty = true;
@@ -95,13 +103,6 @@ void Menu_HandleInput(Menu_State *state, Menu_Input input)
         }
     }
 
-    if (state->page == MENU_PAGE_TIMER) {
-        if (input == MENU_INPUT_BACK) {
-            state->page = MENU_PAGE_MAIN;
-            state->activeTask = 0U;
-            state->dirty = true;
-        }
-    }
 }
 
 /**

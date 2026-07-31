@@ -151,6 +151,7 @@ void LineTrace_ControllerReset(LineTrace_Controller *controller)
     controller->previousRawError = 0;
     controller->basePwm = 0;
     controller->lastDirection = 0;
+    controller->slowdownFrames = 0U;
     controller->lostFrames = 0U;
 }
 
@@ -164,6 +165,8 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
     int16_t correction;
     int16_t correctionLimit;
     int16_t steeringGain;
+    int16_t leftBias;
+    int16_t rightTurnBoost;
 
     output->lineLost = (hasLine == 0U) ? 1U : 0U;
     output->shouldStop = 0U;
@@ -173,17 +176,14 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
         int16_t rawDelta = LineTrace_AbsInt16(
             (int16_t)(rawError - controller->previousRawError));
 
-        /*
-         * 只有一层误差滤波：中心区使用 1/4 新值抑制抖动，
-         * 大偏差或快速换边时使用 3/4 新值保证首帧响应。
-         */
+        /* Small corrections favor response; large corrections favor stability. */
         if ((absRaw >= config->fastErrorThreshold) ||
             (rawDelta >= config->fastDeltaThreshold)) {
             controller->filteredError = (int16_t)(
-                (controller->filteredError + rawError * 3) / 4);
+                (controller->filteredError + rawError) / 2);
         } else {
             controller->filteredError = (int16_t)(
-                (controller->filteredError * 3 + rawError) / 4);
+                (controller->filteredError + rawError * 3) / 4);
         }
 
         controller->previousRawError = rawError;
@@ -197,9 +197,27 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
             controller->lastDirection = -1;
         }
 
-        desiredBase = (int16_t)(config->cruisePwm -
-            LineTrace_AbsInt16(controller->filteredError) *
-            config->curveSlowdownGain);
+        absRaw = LineTrace_AbsInt16(controller->filteredError);
+        if (absRaw >= config->slowdownEntryError) {
+            if (controller->slowdownFrames < config->slowdownConfirmFrames) {
+                controller->slowdownFrames++;
+            }
+        } else {
+            controller->slowdownFrames = 0U;
+        }
+
+        desiredBase = config->cruisePwm;
+        if ((config->slowdownConfirmFrames == 0U) ||
+            (controller->slowdownFrames >= config->slowdownConfirmFrames)) {
+            int16_t slowdownError = (int16_t)(
+                absRaw - config->slowdownEntryError);
+
+            if (slowdownError < 0) {
+                slowdownError = 0;
+            }
+            desiredBase = (int16_t)(config->cruisePwm -
+                slowdownError * config->curveSlowdownGain);
+        }
         if (desiredBase < config->lostPwm) {
             desiredBase = config->lostPwm;
         }
@@ -209,6 +227,7 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
         if (controller->lostFrames < UINT16_MAX) {
             controller->lostFrames++;
         }
+        controller->slowdownFrames = config->slowdownConfirmFrames;
 
         if (controller->lostFrames >= config->lostStopFrames) {
             output->shouldStop = 1U;
@@ -259,7 +278,19 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
         correction = (int16_t)(-correctionLimit);
     }
 
-    output->leftPwm = (int16_t)(controller->basePwm + correction);
+    leftBias = 0;
+    if (config->cruisePwm > 0) {
+        leftBias = (int16_t)(((int32_t)config->leftPwmBias *
+            controller->basePwm) / config->cruisePwm);
+    }
+    rightTurnBoost = 0;
+    if ((correction > 0) && (correctionLimit > 0)) {
+        rightTurnBoost = (int16_t)(((int32_t)config->rightTurnBoost *
+            correction) / correctionLimit);
+    }
+
+    output->leftPwm = (int16_t)(controller->basePwm + correction +
+        leftBias + rightTurnBoost);
     output->rightPwm = (int16_t)(controller->basePwm - correction);
     output->filteredError = controller->filteredError;
     output->basePwm = controller->basePwm;
@@ -290,50 +321,35 @@ const char *LineTrace_StateName(LineTrace_State state)
 
 /* ================================================================
  * A点停车线检测（灰度板原始输入低有效）
- * 条件：D3~D5 或 D4~D6 连续为黑 + 最外侧未命中 + 连续2帧确认
- * 兼容中间3路、理想中间4路以及左偏中部4路 D4~D7。
- * 外侧 D1~D4 或 D5~D8 同时扫到赛道只表示弯道结束，不触发停车。
+ * 条件：任意位置恰好3路有效时立即停车，不要求位置连续或跨帧确认。
+ * 四路及以上同时有效不触发停车。
  * ================================================================ */
 
 CrossLine_Type LineTrace_DetectCrossLine(uint8_t raw, uint8_t activeCount,
                                           uint16_t *lockoutFrames, uint8_t *confirmCount)
 {
-    uint8_t active;
-    uint8_t centerThree;
-
     /* 锁定期内递减 */
     if ((lockoutFrames != 0) && (*lockoutFrames > 0U)) {
         (*lockoutFrames)--;
         return CROSS_LINE_NONE;
     }
 
-    /* 停车线最少覆盖中间连续3路，先做快速排除。 */
-    if (activeCount < 3U) {
-        *confirmCount = 0U;
+    /* Count-only detection keeps steering responsive and removes frame delay. */
+    if (activeCount != 3U) {
+        if (confirmCount != 0) {
+            *confirmCount = 0U;
+        }
         return CROSS_LINE_NONE;
     }
 
-    active = (uint8_t)~raw;
-    centerThree = (uint8_t)((((active & 0x1CU) == 0x1CU) ||
-                             ((active & 0x38U) == 0x38U)) ? 1U : 0U);
-
-    /* D1/D8 命中属于弯道外侧扫描，不把它并入停车线确认。 */
-    if ((centerThree == 0U) || ((active & 0x81U) != 0U)) {
-        *confirmCount = 0U;
-        return CROSS_LINE_NONE;
-    }
-
-    if (*confirmCount < 2U) {
-        (*confirmCount)++;
-    }
-    if (*confirmCount < 2U) {
-        return CROSS_LINE_NONE;
-    }
+    (void)raw;
 
     if (lockoutFrames != 0) {
         *lockoutFrames = 80U;
     }
-    *confirmCount = 0U;
+    if (confirmCount != 0) {
+        *confirmCount = 0U;
+    }
     return CROSS_LINE_DETECTED;
 }
 

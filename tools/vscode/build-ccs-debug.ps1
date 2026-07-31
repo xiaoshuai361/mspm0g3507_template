@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceFolder,
 
-    [string]$Gmake = "D:\APPs\TI\CCS\ccs\utils\bin\gmake.exe",
+    [string]$Gmake = "D:\ti\CCS\ccs\utils\bin\gmake.exe",
 
     [int]$Jobs = 4
 )
@@ -71,6 +71,14 @@ function Show-MemoryUsage {
 }
 
 $projectName = Split-Path -Leaf $WorkspaceFolder
+$projectFile = Join-Path $WorkspaceFolder ".project"
+if (Test-Path -LiteralPath $projectFile -PathType Leaf) {
+    [xml]$projectMetadata = Get-Content -LiteralPath $projectFile -Raw
+    $configuredProjectName = [string]$projectMetadata.projectDescription.name
+    if (-not [string]::IsNullOrWhiteSpace($configuredProjectName)) {
+        $projectName = $configuredProjectName
+    }
+}
 $debugDir = Join-Path $WorkspaceFolder "Debug"
 $program = Join-Path $debugDir "$projectName.out"
 $mapFile = Join-Path $debugDir "$projectName.map"

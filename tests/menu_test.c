@@ -55,6 +55,19 @@ uint32_t Menu_RunSelfTest(void)
     CHECK(Menu_GetActiveTask(&state) == 4U);
     CHECK(Menu_GetPage(&state) == MENU_PAGE_TASKS);
 
+    Menu_ForcePage(&state, MENU_PAGE_TIMER);
+    CHECK(Menu_GetPage(&state) == MENU_PAGE_TIMER);
+    Menu_HandleInput(&state, MENU_INPUT_BACK);
+    CHECK(Menu_GetPage(&state) == MENU_PAGE_TASKS);
+    CHECK(Menu_GetTaskSelection(&state) == 3U);
+    CHECK(Menu_GetActiveTask(&state) == 0U);
+
+    /* Returning to the task page must not restart the previous task. */
+    Menu_HandleInput(&state, MENU_INPUT_NONE);
+    CHECK(Menu_GetActiveTask(&state) == 0U);
+    Menu_HandleInput(&state, MENU_INPUT_ENTER);
+    CHECK(Menu_GetActiveTask(&state) == 4U);
+
     Menu_HandleInput(&state, MENU_INPUT_BACK);
     CHECK(Menu_GetPage(&state) == MENU_PAGE_MAIN);
     CHECK(Menu_GetMainSelection(&state) == 0U);
