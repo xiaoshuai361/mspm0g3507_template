@@ -29,6 +29,7 @@ typedef struct {
     int16_t edgeSteeringKp;
     int16_t edgeSteeringThreshold;
     int16_t steeringMax;
+    int16_t steeringSlewStep;
     int16_t leftPwmBias;
     int16_t rightTurnBoost;
     int16_t centerDeadband;
@@ -45,6 +46,7 @@ typedef struct {
     int16_t filteredError;
     int16_t previousRawError;
     int16_t basePwm;
+    int16_t appliedCorrection;
     int8_t lastDirection;
     uint8_t slowdownFrames;
     uint16_t lostFrames;

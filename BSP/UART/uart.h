@@ -26,6 +26,15 @@ void uart0_send_char(char ch);
  */
 void uart0_send_string(const char *str);
 
+/**
+ * @brief 非阻塞写入 UART0 发送队列。
+ * @param data 待发送字节数组。
+ * @param len 字节数。
+ * @note 数据会整块入队；队列空间不足时整块丢弃，不等待硬件发送完成。
+ * @retval 1 表示成功入队，0 表示参数无效或队列空间不足。
+ */
+uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len);
+
 /* ======== UART3 灰度传感器数据上传 ========
  * TX=PA14  RX=PA13  波特率 115200
  * 数据格式： GD_S:XX\r\n  (XX 为 16进制原始字节)
@@ -54,9 +63,9 @@ void uart3_send_string(const char *str);
  * @param data 浮点数据缓冲区。
  * @param len 浮点数据个数。
  * @note 帧尾固定发送 00 00 80 7F。
- * @retval 无。
+ * @retval 1 表示成功入队，0 表示参数无效或发送队列已满。
  */
-void vofa_justfloat_send(float *data, uint8_t len);
+uint8_t vofa_justfloat_send(const float *data, uint8_t len);
 
 /* ======== VOFA+ 命令接收接口 ========
  * 通过串口终端发送 ASCII 命令调整PID参数：
@@ -79,5 +88,14 @@ uint8_t vofa_get_cmd_ready(void);
  * @retval 返回命令字符串指针。
  */
 const char *vofa_get_cmd(void);
+
+/**
+ * @brief 原子读取一条完整的 VOFA+ ASCII 命令。
+ * @param buffer 输出缓冲区。
+ * @param bufferSize 输出缓冲区大小。
+ * @note 读取成功后自动清除命令就绪标志，避免 ISR 与主循环同时改写命令。
+ * @retval 1 表示读到命令，0 表示暂无命令或参数无效。
+ */
+uint8_t vofa_read_command(char *buffer, uint8_t bufferSize);
 
 #endif

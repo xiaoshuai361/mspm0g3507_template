@@ -97,6 +97,7 @@ static const LineTrace_ControlConfig task1FastControlConfig = {
     .edgeSteeringKp = 20,        /* 提高右半圆持续转向力。 */
     .edgeSteeringThreshold = 6,  /* 死区后偏差达到此值启用强增益；减小会更早强纠偏。 */
     .steeringMax = 480,          /* 放宽高速档差速修正硬上限。 */
+    .steeringSlewStep = 60,      /* 每10ms差速最多变化80，避免阈值跳变时瞬间反打。 */
     .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
     .rightTurnBoost = 135,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
     .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
@@ -120,6 +121,7 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
     .edgeSteeringKp = 14,
     .edgeSteeringThreshold = 6,
     .steeringMax = 240,
+    .steeringSlewStep = 45,
     .leftPwmBias = 39,
     .rightTurnBoost = 70,
     .centerDeadband = 5,
@@ -260,10 +262,11 @@ static void App_LineLapRun(App_LineLapContext *context,
     hasLine = LineTrace_CalcActiveLowWeightedError(
         raw, &errorTenths, &activeCount);
 
-    if (LineTrace_DetectCrossLine(raw, activeCount,
+    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
+        (LineTrace_DetectCrossLine(raw, activeCount,
                                   &context->crossLockout,
                                   &context->crossConfirm)
-        == CROSS_LINE_DETECTED) {
+        == CROSS_LINE_DETECTED)) {
         uint32_t elapsed = (uint32_t)(now - context->startTick);
         char message[40];
 
@@ -286,7 +289,8 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
 
     /* 编码器距离停车(Task3)：|ΔL|+|ΔR| >= 阈值 → 停车 */
-    if (context->stopOnDist != 0U) {
+    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
+        (context->stopOnDist != 0U)) {
         int32_t dL = Encoder_CumulativeL - context->startEncL;
         int32_t dR = Encoder_CumulativeR - context->startEncR;
         uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
@@ -300,7 +304,8 @@ static void App_LineLapRun(App_LineLapContext *context,
 
     LineTrace_ControllerStep(&context->controller, config,
                              hasLine, errorTenths, &controlOutput);
-    if (controlOutput.shouldStop != 0U) {
+    if ((APP_LINE_AUTO_STOP_ENABLED != 0U) &&
+        (controlOutput.shouldStop != 0U)) {
         char message[20];
 
         App_VehicleClosedLoopStop();
@@ -830,7 +835,7 @@ void App_Run(void)
     }
 
     /* 无任务时停车；有任务时由 Task 接管 */
-    if (g_active_task == 0U) {
+    if ((g_active_task == 0U) && !App_VehicleClosedLoopIsEnabled()) {
         App_VehicleClosedLoopStop();
     }
 

@@ -1,5 +1,91 @@
 #include "uart.h"
 
+enum {
+    UART0_TX_BUFFER_SIZE = 256U,
+    VOFA_COMMAND_BUFFER_SIZE = 32U,
+    VOFA_JUSTFLOAT_MAX_CHANNELS = 8U
+};
+
+static uint8_t uart0TxBuffer[UART0_TX_BUFFER_SIZE];
+static volatile uint16_t uart0TxHead;
+static volatile uint16_t uart0TxTail;
+
+static uint16_t uart0_next_index(uint16_t index)
+{
+    index++;
+    if (index >= UART0_TX_BUFFER_SIZE)
+    {
+        index = 0U;
+    }
+    return index;
+}
+
+static uint16_t uart0_tx_free(void)
+{
+    const uint16_t head = uart0TxHead;
+    const uint16_t tail = uart0TxTail;
+
+    if (head >= tail)
+    {
+        return (uint16_t)(UART0_TX_BUFFER_SIZE - (head - tail) - 1U);
+    }
+    return (uint16_t)(tail - head - 1U);
+}
+
+static void uart0_tx_service(void)
+{
+    while ((uart0TxTail != uart0TxHead) &&
+           (DL_UART_Main_isTXFIFOFull(UART_0_INST) == false))
+    {
+        DL_UART_Main_transmitData(UART_0_INST, uart0TxBuffer[uart0TxTail]);
+        uart0TxTail = uart0_next_index(uart0TxTail);
+    }
+
+    if (uart0TxTail == uart0TxHead)
+    {
+        DL_UART_Main_disableInterrupt(UART_0_INST,
+                                      DL_UART_MAIN_INTERRUPT_TX);
+    }
+    else
+    {
+        DL_UART_Main_enableInterrupt(UART_0_INST,
+                                     DL_UART_MAIN_INTERRUPT_TX);
+    }
+}
+
+uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
+{
+    uint16_t writeIndex;
+    uint16_t i;
+    uint32_t primask;
+
+    if ((data == NULL) || (len == 0U))
+    {
+        return 0U;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (len > uart0_tx_free())
+    {
+        __set_PRIMASK(primask);
+        return 0U;
+    }
+
+    writeIndex = uart0TxHead;
+    for (i = 0U; i < len; i++)
+    {
+        uart0TxBuffer[writeIndex] = data[i];
+        writeIndex = uart0_next_index(writeIndex);
+    }
+    uart0TxHead = writeIndex;
+
+    /* 先填满硬件 FIFO，再由 TX 中断继续搬运剩余字节。 */
+    uart0_tx_service();
+    __set_PRIMASK(primask);
+    return 1U;
+}
+
 /* ================================================================
  *  UART3 — 灰度传感器数据上传（TX=PA14, RX=PA13, 115200bps）
  * ================================================================ */
@@ -41,6 +127,9 @@ void uart3_send_string(const char *str)
  */
 void uart0_init(void)
 {
+    DL_UART_Main_setTXFIFOThreshold(UART_0_INST,
+                                    DL_UART_MAIN_TX_FIFO_LEVEL_EMPTY);
+    DL_UART_Main_disableInterrupt(UART_0_INST, DL_UART_MAIN_INTERRUPT_TX);
     NVIC_ClearPendingIRQ(UART_0_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
     uart0_send_string("VOFA+ Ready\r\n");
@@ -54,9 +143,9 @@ void uart0_init(void)
  */
 void uart0_send_char(char ch)
 {
-    while (DL_UART_Main_isBusy(UART_0_INST) == true)
-        ;
-    DL_UART_Main_transmitData(UART_0_INST, ch);
+    const uint8_t data = (uint8_t)ch;
+
+    (void)uart0_write_nonblocking(&data, 1U);
 }
 
 /**
@@ -67,10 +156,14 @@ void uart0_send_char(char ch)
  */
 void uart0_send_string(const char *str)
 {
+    size_t len;
+
     if (str == NULL)
         return;
-    while (*str != '\0')
-        uart0_send_char(*str++);
+    len = strlen(str);
+    if (len > UINT16_MAX)
+        return;
+    (void)uart0_write_nonblocking((const uint8_t *)str, (uint16_t)len);
 }
 
 /**
@@ -82,9 +175,10 @@ void uart0_send_string(const char *str)
  */
 int fputc(int ch, FILE *stream)
 {
-    while (DL_UART_isBusy(UART_0_INST) == true)
-        ;
-    DL_UART_Main_transmitData(UART_0_INST, ch);
+    const uint8_t data = (uint8_t)ch;
+
+    (void)stream;
+    (void)uart0_write_nonblocking(&data, 1U);
     return ch;
 }
 
@@ -97,15 +191,17 @@ int fputc(int ch, FILE *stream)
  */
 int fputs(const char *restrict s, FILE *restrict stream)
 {
-    uint16_t char_len = 0;
-    while (*s != 0)
-    {
-        while (DL_UART_isBusy(UART_0_INST) == true)
-            ;
-        DL_UART_Main_transmitData(UART_0_INST, *s++);
-        char_len++;
-    }
-    return char_len;
+    size_t len;
+
+    (void)stream;
+    if (s == NULL)
+        return EOF;
+    len = strlen(s);
+    if (len > UINT16_MAX)
+        return EOF;
+    return uart0_write_nonblocking((const uint8_t *)s, (uint16_t)len)
+               ? (int)len
+               : EOF;
 }
 
 /**
@@ -124,38 +220,34 @@ int puts(const char *_ptr)
 }
 
 /* ================================================================
- *  VOFA+ JustFloat \u53d1\u9001\u51fd\u6570
- *  \u683c\u5f0f\uff1a [float0 4B][float1 4B]...[floatN-1 4B][0x00 0x00 0x80 0x7F]
- *  \u5728VOFA+\u4e2d\u9009\u62e9 "JustFloat" \u534f\u8bae\u5373\u53ef\u81ea\u52a8\u89e3\u6790\u6d6e\u70b9\u6570\u636e
+ *  VOFA+ JustFloat transmit
+ *  Format: [float0]...[floatN-1][00 00 80 7F]
  * ================================================================ */
-/**
- * @brief 按 VOFA JustFloat 协议发送浮点数组。
- * @param data 数据缓冲区。
- * @param len 数据长度。
- * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
- * @retval 无。
- */
-void vofa_justfloat_send(float *data, uint8_t len)
+uint8_t vofa_justfloat_send(const float *data, uint8_t len)
 {
-    uint8_t i, j;
-    for (i = 0; i < len; i++)
+    uint8_t frame[(VOFA_JUSTFLOAT_MAX_CHANNELS * sizeof(float)) + 4U];
+    const uint16_t payloadSize = (uint16_t)len * (uint16_t)sizeof(float);
+
+    if ((data == NULL) || (len == 0U) ||
+        (len > VOFA_JUSTFLOAT_MAX_CHANNELS))
     {
-        uint8_t *p = (uint8_t *)&data[i];
-        for (j = 0; j < 4; j++)
-            uart0_send_char((char)p[j]);
+        return 0U;
     }
-    /* JustFloat \u5e27\u5c3e */
-    uart0_send_char((char)0x00);
-    uart0_send_char((char)0x00);
-    uart0_send_char((char)0x80);
-    uart0_send_char((char)0x7F);
+
+    memcpy(frame, data, payloadSize);
+    frame[payloadSize + 0U] = 0x00U;
+    frame[payloadSize + 1U] = 0x00U;
+    frame[payloadSize + 2U] = 0x80U;
+    frame[payloadSize + 3U] = 0x7FU;
+    return uart0_write_nonblocking(frame, (uint16_t)(payloadSize + 4U));
 }
 
 /* ================================================================
  *  VOFA+ \u547d\u4ee4\u63a5\u6536\uff08ASCII \u5355\u884c\u547d\u4ee4\uff09
- *  \u793a\u4f8b\uff1a\u5728VOFA+\u63a7\u5236\u53f0\u53d1\u9001 "KP=1.5\n" \u5373\u53ef\u4fee\u6539 Kp
+ *  Example: send "KP=1.5\n" from VOFA to update Kp.
  * ================================================================ */
-static char vofa_cmd_buf[32]; /**< vofa_cmd_buf 全局状态或配置变量。 */
+static char vofa_rx_buf[VOFA_COMMAND_BUFFER_SIZE];
+static char vofa_cmd_buf[VOFA_COMMAND_BUFFER_SIZE]; /**< vofa_cmd_buf 全局状态或配置变量。 */
 static uint8_t vofa_cmd_idx = 0; /**< vofa_cmd_idx 全局状态或配置变量。 */
 static volatile uint8_t vofa_cmd_ready = 0; /**< vofa_cmd_ready 全局状态或配置变量。 */
 
@@ -186,23 +278,65 @@ const char *vofa_get_cmd(void)
     return vofa_cmd_buf;
 }
 
+uint8_t vofa_read_command(char *buffer, uint8_t bufferSize)
+{
+    uint8_t hasCommand = 0U;
+    uint32_t primask;
+
+    if ((buffer == NULL) || (bufferSize == 0U))
+    {
+        return 0U;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (vofa_cmd_ready != 0U)
+    {
+        (void)strncpy(buffer, vofa_cmd_buf, (size_t)bufferSize - 1U);
+        buffer[bufferSize - 1U] = '\0';
+        vofa_cmd_ready = 0U;
+        hasCommand = 1U;
+    }
+    __set_PRIMASK(primask);
+    return hasCommand;
+}
+
 void UART0_IRQHandler(void)
 {
-    if (DL_UART_getPendingInterrupt(UART_0_INST) == DL_UART_IIDX_RX)
+    switch (DL_UART_Main_getPendingInterrupt(UART_0_INST))
     {
-        uint8_t ch = DL_UART_Main_receiveData(UART_0_INST);
-        if (ch == '\n' || ch == '\r')
+    case DL_UART_MAIN_IIDX_RX:
+        while (DL_UART_Main_isRXFIFOEmpty(UART_0_INST) == false)
         {
-            if (vofa_cmd_idx > 0)
+            const uint8_t ch = DL_UART_Main_receiveData(UART_0_INST);
+
+            if ((ch == '\n') || (ch == '\r'))
             {
-                vofa_cmd_buf[vofa_cmd_idx] = '\0';
-                vofa_cmd_ready = 1;
+                if ((vofa_cmd_idx > 0U) && (vofa_cmd_ready == 0U))
+                {
+                    vofa_rx_buf[vofa_cmd_idx] = '\0';
+                    memcpy(vofa_cmd_buf, vofa_rx_buf,
+                           (size_t)vofa_cmd_idx + 1U);
+                    vofa_cmd_ready = 1U;
+                }
                 vofa_cmd_idx = 0;
             }
+            else if (vofa_cmd_idx < (VOFA_COMMAND_BUFFER_SIZE - 1U))
+            {
+                vofa_rx_buf[vofa_cmd_idx++] = (char)ch;
+            }
+            else
+            {
+                vofa_cmd_idx = 0U;
+            }
         }
-        else if (vofa_cmd_idx < 31)
-        {
-            vofa_cmd_buf[vofa_cmd_idx++] = (char)ch;
-        }
+        break;
+
+    case DL_UART_MAIN_IIDX_TX:
+        uart0_tx_service();
+        break;
+
+    default:
+        break;
     }
 }

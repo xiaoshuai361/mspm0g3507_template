@@ -28,11 +28,12 @@ static uint32_t lastLineTick;                           /**< 上一次灰度循�
 static uint32_t lastSpeedTick;                          /**< 上一次编码器测速时间戳。 */
 static uint32_t lastControlTick;                        /**< 上一次 PID 闭环输出时间戳。 */
 static uint32_t lastDebugTick;                          /**< 上一次车辆调试信息输出时间戳。 */
+static uint32_t lastVofaTick;                           /**< 上一次 VOFA JustFloat 数据帧时间戳。 */
 
 static PID_t leftSpeedPid = {
     /**< 左轮速度闭环 PID 参数和运行状态。 */
     .Target = 0.0f,
-    .Kp = 23.0f,
+    .Kp = 10.0f,
     .Ki = 0.3f,
     .Kd = 0.1f,
     .OutMax = APP_VEHICLE_PID_OUT_MAX,
@@ -44,13 +45,18 @@ static PID_t leftSpeedPid = {
 static PID_t rightSpeedPid = {
     /**< 右轮速度闭环 PID 参数和运行状态。 */
     .Target = 0.0f,
-    .Kp = 23.0f,
+    .Kp = 10.0f,
     .Ki = 0.3f,
     .Kd = 0.1f,
     .OutMax = APP_VEHICLE_PID_OUT_MAX,
     .OutMin = APP_VEHICLE_PID_OUT_MIN,
     .ErrMax = APP_VEHICLE_PID_ERR_MAX,
     .DeltaMax = APP_VEHICLE_PID_DELTA_MAX,
+};
+
+enum {
+    APP_VOFA_COMMAND_SIZE = 32U,
+    APP_VOFA_CHANNEL_COUNT = 6U
 };
 
 /**
@@ -99,6 +105,187 @@ static void App_VehicleResetPid(PID_t *pid)
     pid->Deriv = 0.0f;
 }
 
+static uint8_t App_VehicleAsciiUpper(uint8_t ch)
+{
+    if ((ch >= (uint8_t)'a') && (ch <= (uint8_t)'z'))
+    {
+        ch = (uint8_t)(ch - ((uint8_t)'a' - (uint8_t)'A'));
+    }
+    return ch;
+}
+
+static bool App_VehicleParseFloat(const char *text, float *value)
+{
+    float parsed = 0.0f;
+    float fractionScale = 0.1f;
+    bool negative = false;
+    bool hasDigit = false;
+
+    if ((text == NULL) || (value == NULL))
+    {
+        return false;
+    }
+
+    while ((*text == ' ') || (*text == '\t'))
+    {
+        text++;
+    }
+    if ((*text == '+') || (*text == '-'))
+    {
+        negative = (*text == '-');
+        text++;
+    }
+    while ((*text >= '0') && (*text <= '9'))
+    {
+        parsed = (parsed * 10.0f) + (float)(*text - '0');
+        hasDigit = true;
+        text++;
+    }
+    if (*text == '.')
+    {
+        text++;
+        while ((*text >= '0') && (*text <= '9'))
+        {
+            parsed += (float)(*text - '0') * fractionScale;
+            fractionScale *= 0.1f;
+            hasDigit = true;
+            text++;
+        }
+    }
+    while ((*text == ' ') || (*text == '\t'))
+    {
+        text++;
+    }
+    if (!hasDigit || (*text != '\0'))
+    {
+        return false;
+    }
+
+    *value = negative ? -parsed : parsed;
+    return true;
+}
+
+static int16_t App_VehicleGainToHundredths(float gain)
+{
+    return (int16_t)((gain * 100.0f) + 0.5f);
+}
+
+static void App_VehiclePublishPidParameters(void)
+{
+    App_MenuSetPidData(App_VehicleGainToHundredths(leftSpeedPid.Kp),
+                       App_VehicleGainToHundredths(leftSpeedPid.Ki),
+                       App_VehicleGainToHundredths(leftSpeedPid.Kd));
+}
+
+static void App_VehicleApplyVofaCommand(const char *command)
+{
+    const char *valueText;
+    float value;
+    uint8_t first;
+    uint8_t second;
+
+    if (command == NULL)
+    {
+        return;
+    }
+
+    first = App_VehicleAsciiUpper((uint8_t)command[0]);
+    second = App_VehicleAsciiUpper((uint8_t)command[1]);
+
+    if (first == (uint8_t)'S')
+    {
+        if ((command[1] != '=') && (command[1] != ':'))
+        {
+            return;
+        }
+        valueText = &command[2];
+    }
+    else if ((first == (uint8_t)'K') &&
+             ((second == (uint8_t)'P') || (second == (uint8_t)'I') ||
+              (second == (uint8_t)'D')))
+    {
+        if ((command[2] != '=') && (command[2] != ':'))
+        {
+            return;
+        }
+        valueText = &command[3];
+    }
+    else
+    {
+        return;
+    }
+
+    if (!App_VehicleParseFloat(valueText, &value))
+    {
+        return;
+    }
+
+    if ((first == (uint8_t)'K') &&
+        ((second == (uint8_t)'P') || (second == (uint8_t)'I') ||
+         (second == (uint8_t)'D')) &&
+        (value >= 0.0f) && (value <= APP_VOFA_PID_GAIN_MAX))
+    {
+        if (second == (uint8_t)'P')
+        {
+            leftSpeedPid.Kp = value;
+            rightSpeedPid.Kp = value;
+        }
+        else if (second == (uint8_t)'I')
+        {
+            leftSpeedPid.Ki = value;
+            rightSpeedPid.Ki = value;
+        }
+        else
+        {
+            leftSpeedPid.Kd = value;
+            rightSpeedPid.Kd = value;
+        }
+        App_VehiclePublishPidParameters();
+    }
+    else if ((first == (uint8_t)'S') &&
+             (value >= 0.0f) && (value <= APP_VOFA_SPEED_MAX))
+    {
+        standardSpeed = value;
+        if (value == 0.0f)
+        {
+            App_VehicleClosedLoopStop();
+        }
+        else
+        {
+            App_VehicleClosedLoopSetTarget(value, value);
+        }
+    }
+}
+
+static void App_VehicleVofaReceiveRun(void)
+{
+    char command[APP_VOFA_COMMAND_SIZE];
+
+    if (vofa_read_command(command, sizeof(command)) != 0U)
+    {
+        App_VehicleApplyVofaCommand(command);
+    }
+}
+
+static void App_VehicleVofaTransmitRun(uint32_t now)
+{
+    float data[APP_VOFA_CHANNEL_COUNT];
+
+    if ((uint32_t)(now - lastVofaTick) < APP_VOFA_TELEMETRY_PERIOD_MS)
+    {
+        return;
+    }
+    lastVofaTick = now;
+
+    data[0] = Motor1_Speed;
+    data[1] = Motor2_Speed;
+    data[2] = leftSpeedPid.Target;
+    data[3] = rightSpeedPid.Target;
+    data[4] = leftSpeedPid.Out;
+    data[5] = rightSpeedPid.Out;
+    (void)vofa_justfloat_send(data, APP_VOFA_CHANNEL_COUNT);
+}
+
 /**
  * @brief 设置左右轮速度闭环目标值。
  * @param leftTarget 左轮目标速度。
@@ -136,6 +323,11 @@ float App_VehicleClosedLoopGetAverageTarget(void)
     return (leftSpeedPid.Target + rightSpeedPid.Target) * 0.5f;
 }
 
+bool App_VehicleClosedLoopIsEnabled(void)
+{
+    return speedLoopEnabled;
+}
+
 /**
  * @brief 初始化蓝牙、编码器和车辆控制状态。
  * @param 无。
@@ -155,6 +347,7 @@ void App_VehicleInit(void)
     Encoder_Init();
     uart0_send_string("Vehicle encoder OK\r\n");
     App_VehicleClosedLoopStop();
+    App_VehiclePublishPidParameters();
 
     vehicleInitialized = true;
     uart0_send_string("Vehicle init OK\r\n");
@@ -327,18 +520,16 @@ void App_VehicleControlRun(void)
 {
     const uint32_t now = BSP_Delay_GetTick();
 
+    App_VehicleVofaReceiveRun();
+
     if ((uint32_t)(now - lastSpeedTick) >= APP_VEHICLE_SPEED_PERIOD_MS)
     {
         lastSpeedTick = now;
         MEASURE_MOTORS_SPEED();
     }
 
-    if (!speedLoopEnabled)
-    {
-        return;
-    }
-
-    if ((uint32_t)(now - lastControlTick) >= APP_VEHICLE_CONTROL_PERIOD_MS)
+    if (speedLoopEnabled &&
+        ((uint32_t)(now - lastControlTick) >= APP_VEHICLE_CONTROL_PERIOD_MS))
     {
         lastControlTick = now;
 
@@ -349,6 +540,8 @@ void App_VehicleControlRun(void)
         PID_Update(&rightSpeedPid);
         Set_Speed((int)(leftSpeedPid.Out), (int)(rightSpeedPid.Out));
     }
+
+    App_VehicleVofaTransmitRun(now);
 }
 
 /**

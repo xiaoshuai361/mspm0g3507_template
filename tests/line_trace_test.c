@@ -292,6 +292,33 @@ static uint32_t LineTrace_TestStableController(void)
     return failures;
 }
 
+static uint32_t LineTrace_TestSteeringSlew(void)
+{
+    uint32_t failures = 0U;
+    LineTrace_ControlConfig config = lineControlTestConfig;
+    LineTrace_Controller controller;
+    LineTrace_ControlOutput output;
+
+    config.steeringSlewStep = 50;
+    LineTrace_ControllerReset(&controller);
+    controller.basePwm = 1100;
+
+    LineTrace_ControllerStep(&controller, &config, 1U, 35, &output);
+    if ((output.correction != 50) ||
+        (output.leftPwm != 1215) || (output.rightPwm != 1050)) {
+        failures++;
+    }
+
+    /* 误差突然换边时先平滑回到零，不允许单帧直接反向满纠偏。 */
+    LineTrace_ControllerStep(&controller, &config, 1U, -35, &output);
+    if ((output.correction != 0) ||
+        (output.leftPwm != 1150) || (output.rightPwm != 1100)) {
+        failures++;
+    }
+
+    return failures;
+}
+
 uint32_t LineTrace_RunSelfTest(void)
 {
     uint32_t failures = 0U;
@@ -336,6 +363,7 @@ uint32_t LineTrace_RunSelfTest(void)
     failures += LineTrace_TestCrossLine();
     failures += LineTrace_TestController();
     failures += LineTrace_TestStableController();
+    failures += LineTrace_TestSteeringSlew();
 
     return failures;
 }

@@ -150,6 +150,7 @@ void LineTrace_ControllerReset(LineTrace_Controller *controller)
     controller->filteredError = 0;
     controller->previousRawError = 0;
     controller->basePwm = 0;
+    controller->appliedCorrection = 0;
     controller->lastDirection = 0;
     controller->slowdownFrames = 0U;
     controller->lostFrames = 0U;
@@ -277,6 +278,20 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
     } else if (correction < -correctionLimit) {
         correction = (int16_t)(-correctionLimit);
     }
+
+    if (config->steeringSlewStep > 0) {
+        controller->appliedCorrection = LineTrace_MoveToward(
+            controller->appliedCorrection, correction,
+            config->steeringSlewStep, config->steeringSlewStep);
+    } else {
+        controller->appliedCorrection = correction;
+    }
+    if (controller->appliedCorrection > correctionLimit) {
+        controller->appliedCorrection = correctionLimit;
+    } else if (controller->appliedCorrection < -correctionLimit) {
+        controller->appliedCorrection = (int16_t)(-correctionLimit);
+    }
+    correction = controller->appliedCorrection;
 
     leftBias = 0;
     if (config->cruisePwm > 0) {
