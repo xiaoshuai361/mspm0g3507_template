@@ -135,6 +135,13 @@ void App_MenuInputRun(void)
     App_MenuPollInput(BSP_Delay_GetTick());
 }
 
+void App_MenuReturnToTaskList(void)
+{
+    Menu_ReturnToTaskList(&menuState);
+    g_active_task = 0U;
+    uart0_send_string("ACTIVE TASK=0\r\n");
+}
+
 /**
  * @brief 运行 OLED 菜单：读取按键、处理菜单输入，并按需刷新动态页面。
  * @param 无。

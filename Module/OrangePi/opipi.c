@@ -4,6 +4,12 @@
 static volatile uint8_t opiRxFlag;
 static volatile uint8_t opiRxData;
 
+static void OPi_SendByte(uint8_t data)
+{
+    while (DL_UART_Main_isBusy(UART_2_INST)) {}
+    DL_UART_Main_transmitData(UART_2_INST, data);
+}
+
 void OPi_Init(void)
 {
     /* 用蓝牙模块的初始化流程（已验证的UART2配置），然后改波特率 */
@@ -23,10 +29,23 @@ void OPi_Init(void)
 
 void OPi_SendCmd(uint8_t code)
 {
-    while (DL_UART_Main_isBusy(UART_2_INST)) {}
-    DL_UART_Main_transmitData(UART_2_INST, OPI_FRAME_HEAD);
-    while (DL_UART_Main_isBusy(UART_2_INST)) {}
-    DL_UART_Main_transmitData(UART_2_INST, code);
+    OPi_SendByte(OPI_FRAME_HEAD);
+    OPi_SendByte(code);
+}
+
+void OPi_SendPsValue(float ps)
+{
+    union {
+        float value;
+        uint8_t bytes[sizeof(float)];
+    } payload;
+    uint32_t i;
+
+    payload.value = ps;
+    OPi_SendByte(OPI_FRAME_HEAD);
+    for (i = 0U; i < (uint32_t)sizeof(payload.bytes); i++) {
+        OPi_SendByte(payload.bytes[i]);
+    }
 }
 
 uint8_t OPi_ReadByte(uint8_t *byte)

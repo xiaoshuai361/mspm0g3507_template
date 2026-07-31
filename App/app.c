@@ -15,6 +15,7 @@
 #include "menu_test.h"
 #include "motor.h"
 #include "Encoder.h"
+#include "Encoder_XZ.h"
 #include "oled.h"
 #include "../Module/OrangePi/opipi.h"
 #include "uart.h"
@@ -103,7 +104,7 @@ static const LineTrace_ControlConfig task1FastControlConfig = {
     .steeringMax = 480,          /* 放宽高速档差速修正硬上限。 */
     .steeringSlewStep = 60,      /* 每10ms差速最多变化60，避免阈值跳变时瞬间反打。 */
     .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
-    .rightTurnBoost = 135,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
+    .rightTurnBoost = 115,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
     .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
     .fastErrorThreshold = 15,    /* 原始偏差达到此值使用3/4新值快滤波；减小响应更快。 */
     .fastDeltaThreshold = 12,    /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
@@ -111,7 +112,7 @@ static const LineTrace_ControlConfig task1FastControlConfig = {
     .lostSearchStepFrames = 2U,  /* 搜索偏差每隔多少帧加1；减小会更快增强搜索。 */
     .lostHoldFrames = 1U,        /* 丢线后保持最后纠偏的帧数；当前1帧即10ms。 */
     .slowdownConfirmFrames = 3U, /* 偏差持续30ms才开始降速，滤除瞬时抖动。 */
-    .lostStopFrames = 150U,      /* 连续丢线停车时间；当前150帧即1.5s。 */
+    .lostStopFrames = 1500U,      /* 连续丢线停车时间；当前150帧即1.5s。 */
 };
 
 static const LineTrace_ControlConfig task2StableControlConfig = {
@@ -143,6 +144,13 @@ static App_LineLapContext task3LineContext = {
     .startKeyArmed = 1U, .stopOnDist = 1U };
 static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
+static uint8_t task5ResetPending = 1U;
+static uint8_t task5OwnsInterface;
+
+enum {
+    TASK5_PS_MIN_TENTHS = -120,
+    TASK5_PS_MAX_TENTHS = 120
+};
 
 static bool App_LineControlIsTimingCritical(void)
 {
@@ -150,6 +158,7 @@ static bool App_LineControlIsTimingCritical(void)
 
     switch (g_active_task) {
     case 1U: context = &task1LineContext; break;
+    case 6U: context = &task1LineContext; break;
     case 3U: context = &task3LineContext; break;
     case 4U: context = &task4LineContext; break;
     case 5U: context = &task5LineContext; break;
@@ -176,14 +185,15 @@ static void App_LineLapReset(App_LineLapContext *context)
                                &context->crossConfirm);
 }
 
-static float App_LinePwmToSpeedTarget(int16_t equivalentPwm)
+static float App_LinePwmToSpeedTarget(int16_t equivalentPwm,
+                                      float referenceSpeed)
 {
-    return ((float)equivalentPwm * APP_VEHICLE_DEFAULT_SPEED) /
+    return ((float)equivalentPwm * referenceSpeed) /
            (float)APP_STABLE_LINE_CRUISE_PWM;
 }
 
 static void App_LineApplyClosedLoopTarget(
-    const LineTrace_ControlOutput *controlOutput)
+    const LineTrace_ControlOutput *controlOutput, float referenceSpeed)
 {
     const int16_t leftEquivalentPwm = (int16_t)(
         controlOutput->basePwm + controlOutput->correction);
@@ -192,8 +202,8 @@ static void App_LineApplyClosedLoopTarget(
 
     /* 固定 PWM 偏置由速度环自动补偿，只保留巡线产生的目标差速。 */
     App_VehicleClosedLoopSetTarget(
-        App_LinePwmToSpeedTarget(leftEquivalentPwm),
-        App_LinePwmToSpeedTarget(rightEquivalentPwm));
+        App_LinePwmToSpeedTarget(leftEquivalentPwm, referenceSpeed),
+        App_LinePwmToSpeedTarget(rightEquivalentPwm, referenceSpeed));
 }
 
 static void App_LineApplyBrake(int16_t brakePwm)
@@ -204,7 +214,8 @@ static void App_LineApplyBrake(int16_t brakePwm)
 
 static void App_LineLapRun(App_LineLapContext *context,
                            const LineTrace_ControlConfig *config,
-                           uint8_t taskNumber, int16_t brakePwm,
+                           uint8_t taskNumber, float referenceSpeed,
+                           int16_t brakePwm,
                            uint16_t brakeDurationMs,
                            uint32_t brakeDelayPulses)
 {
@@ -359,14 +370,69 @@ static void App_LineLapRun(App_LineLapContext *context,
         return;
     }
 
-    App_LineApplyClosedLoopTarget(&controlOutput);
+    App_LineApplyClosedLoopTarget(&controlOutput, referenceSpeed);
+}
+
+static void App_Task5FormatTenths(char *buffer, uint32_t size,
+                                  int16_t valueTenths)
+{
+    int16_t whole;
+    int16_t fraction;
+    char sign = '+';
+
+    if (valueTenths < 0) {
+        sign = '-';
+        valueTenths = (int16_t)-valueTenths;
+    }
+    whole = (int16_t)(valueTenths / 10);
+    fraction = (int16_t)(valueTenths % 10);
+
+    (void)snprintf(buffer, size, "%c%d.%d", sign,
+                   (int)whole, (int)fraction);
+}
+
+static void App_Task5RenderPsSelect(int16_t psTenths)
+{
+    char line[22];
+
+    OLED_ClearBuffer();
+    OLED_ShowString(0U, 0U, "TASK5 SET PS", 8U, 1U);
+    App_Task5FormatTenths(line, sizeof(line), psTenths);
+    OLED_ShowString(0U, 18U, "PS:", 16U, 1U);
+    OLED_ShowString(32U, 18U, line, 16U, 1U);
+    OLED_ShowString(0U, 42U, "ENC -12.0..+12.0", 8U, 1U);
+    OLED_ShowString(0U, 54U, "RIGHT OK", 8U, 1U);
+    OLED_Refresh();
+}
+
+static void App_Task5RenderStatus(const char *status)
+{
+    OLED_ClearBuffer();
+    OLED_ShowString(0U, 0U, "TASK5", 16U, 1U);
+    OLED_ShowString(0U, 24U, status, 8U, 1U);
+    OLED_Refresh();
+}
+
+static void App_Task5ReturnToTaskList(void)
+{
+    Encoder_XZ_Disable();
+    App_VehicleClosedLoopStop();
+    OPi_FlushRx();
+    task5OwnsInterface = 0U;
+    App_LineLapReset(&task5LineContext);
+    App_MenuReturnToTaskList();
 }
 
 /* Task 1：1100 PWM 竞速档 + 遇A停车。 */
 void App_Task1Run(void)
 {
+    const float referenceSpeed = (g_active_task == 6U)
+                                     ? APP_TASK1_LOW_SPEED
+                                     : APP_VEHICLE_DEFAULT_SPEED;
+
     App_LineLapRun(&task1LineContext, &task1FastControlConfig, 1U,
-                   APP_TASK1_BRAKE_PWM, APP_TASK1_BRAKE_DURATION_MS,
+                   referenceSpeed, APP_TASK1_BRAKE_PWM,
+                   APP_TASK1_BRAKE_DURATION_MS,
                    APP_TASK1_BRAKE_DELAY_PULSES);
 }
 
@@ -430,12 +496,12 @@ void App_Task3Run(void)
     case T3_READY:
         /* 等待中键按下启动循迹 */
         App_LineLapRun(&task3LineContext, &task2StableControlConfig,
-                       3U, 0, 0U, 0U);
+                       3U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
         if (task3LineContext.state == APP_LINE_LAP_TRACKING) state = T3_TRACK;
         break;
     case T3_TRACK:
         App_LineLapRun(&task3LineContext, &task2StableControlConfig,
-                       3U, 0, 0U, 0U);
+                       3U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
         if (task3LineContext.state == APP_LINE_LAP_STOPPED) state = T3_FINISH;
         break;
     case T3_FINISH: {
@@ -483,12 +549,12 @@ void App_Task4Run(void)
         break; }
     case T4_READY:
         App_LineLapRun(&task4LineContext, &task2StableControlConfig,
-                       4U, 0, 0U, 0U);
+                       4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
         if (task4LineContext.state == APP_LINE_LAP_TRACKING) state = T4_TRACK;
         break;
     case T4_TRACK:
         App_LineLapRun(&task4LineContext, &task2StableControlConfig,
-                       4U, 0, 0U, 0U);
+                       4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
         if (task4LineContext.state == APP_LINE_LAP_STOPPED) state = T4_FINISH;
         break;
     case T4_FINISH: {
@@ -509,54 +575,120 @@ void App_Task4Run(void)
 }
 
 /*
- * Task 5 —— 题6：单圈+经过A（香橙派协议，不记录初始位置直接发车）
- * 发送AA 06 → 等待AA 00 → 循迹 → 停车发AA 0F → 等待AA 00
+ * Task 5 —— 题6：旋转编码器设定小球保持位置后发车。
+ * 发送AA+float(ps) → 等待00 → 右键循迹 → 停车发送AA 0F → 等待00。
  */
 void App_Task5Run(void)
 {
-    enum { T5_SEND, T5_WAIT, T5_READY, T5_TRACK, T5_FINISH, T5_DONE };
-    static uint8_t state = T5_SEND;
-    static uint8_t lastActive;
+    enum { T5_SELECT_PS, T5_WAIT_PS_ACK, T5_READY,
+           T5_TRACK, T5_FINISH, T5_DONE };
+    static uint8_t state = T5_SELECT_PS;
+    static uint8_t rightKeyArmed;
+    static uint8_t finishSent;
+    static int16_t psTenths;
+    static int16_t lastDisplayPsTenths = 32767;
+    static uint32_t lastDisplayTick;
+    Key5D_Event keyEvent = KEY5D_EVENT_NONE;
 
-    if (lastActive != 5U) {
-        lastActive = 5U; state = T5_SEND; OPi_FlushRx();
+    if (task5ResetPending != 0U) {
+        task5ResetPending = 0U;
+        state = T5_SELECT_PS;
+        rightKeyArmed = 0U;
+        finishSent = 0U;
+        psTenths = 0;
+        lastDisplayPsTenths = 32767;
+        lastDisplayTick = 0U;
+        Encoder_XZ_SetValue(0);
+        Encoder_XZ_Enable();
+        task5OwnsInterface = 1U;
+        OPi_FlushRx();
         App_LineLapReset(&task5LineContext);
     }
 
+    if ((task5OwnsInterface != 0U) &&
+        App_InputPoll(BSP_Delay_GetTick(), &keyEvent) &&
+        (keyEvent == KEY5D_EVENT_PRESSED)) {
+        const Key5D_Key pressedKey = App_InputGetStableKey();
+
+        App_LogKeyPress(pressedKey);
+        if (pressedKey == KEY5D_KEY_LEFT) {
+            App_Task5ReturnToTaskList();
+            return;
+        }
+    }
+
     switch (state) {
-    case T5_SEND:
-        OPi_SendCmd(OPI_CMD_TASK6);
-        state = T5_WAIT;
-        break;
-    case T5_WAIT: {
-        uint8_t b;
-        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
-            App_InputGetStableKey() != KEY5D_KEY_RIGHT) state = T5_READY;
+    case T5_SELECT_PS: {
+        const uint32_t now = BSP_Delay_GetTick();
+        const Key5D_Key stableKey = App_InputGetStableKey();
+        char message[40];
+
         App_VehicleClosedLoopStop();
+        psTenths = (int16_t)Encoder_XZ_GetClampedValue(
+            TASK5_PS_MIN_TENTHS, TASK5_PS_MAX_TENTHS);
+
+        if ((psTenths != lastDisplayPsTenths) ||
+            ((uint32_t)(now - lastDisplayTick) >= 100U)) {
+            lastDisplayPsTenths = psTenths;
+            lastDisplayTick = now;
+            App_Task5RenderPsSelect(psTenths);
+        }
+
+        if (stableKey != KEY5D_KEY_RIGHT) {
+            rightKeyArmed = 1U;
+        } else if (rightKeyArmed != 0U) {
+            rightKeyArmed = 0U;
+            Encoder_XZ_Disable();
+            OPi_FlushRx();
+            OPi_SendPsValue((float)psTenths / 10.0f);
+            App_Task5FormatTenths(message, sizeof(message), psTenths);
+            uart0_send_string("T5 PS=");
+            uart0_send_string(message);
+            uart0_send_string("\r\n");
+            App_Task5RenderStatus("WAIT OPI ACK");
+            state = T5_WAIT_PS_ACK;
+        }
+        break; }
+    case T5_WAIT_PS_ACK: {
+        uint8_t b;
+        App_VehicleClosedLoopStop();
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK &&
+            App_InputGetStableKey() != KEY5D_KEY_RIGHT) {
+            App_Task5RenderStatus("RIGHT TO START");
+            state = T5_READY;
+        }
         break; }
     case T5_READY:
         App_LineLapRun(&task5LineContext, &task2StableControlConfig,
-                       5U, 0, 0U, 0U);
-        if (task5LineContext.state == APP_LINE_LAP_TRACKING) state = T5_TRACK;
+                       5U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
+        if (task5LineContext.state == APP_LINE_LAP_TRACKING) {
+            task5OwnsInterface = 0U;
+            state = T5_TRACK;
+        }
         break;
     case T5_TRACK:
         App_LineLapRun(&task5LineContext, &task2StableControlConfig,
-                       5U, 0, 0U, 0U);
-        if (task5LineContext.state == APP_LINE_LAP_STOPPED) state = T5_FINISH;
+                       5U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
+        if (task5LineContext.state == APP_LINE_LAP_STOPPED) {
+            task5OwnsInterface = 1U;
+            state = T5_FINISH;
+        }
         break;
     case T5_FINISH: {
-        static uint8_t sent;
-        if (sent == 0U) { OPi_SendCmd(OPI_CMD_FINISH); sent = 1U; }
         uint8_t b;
-        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) { sent = 0U; state = T5_DONE; }
-        break; }
-    case T5_DONE: {
-        Key5D_Event ev = KEY5D_EVENT_NONE;
-        if (App_InputPoll(BSP_Delay_GetTick(), &ev) && ev == KEY5D_EVENT_PRESSED
-            && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
-            state = T5_SEND; OPi_FlushRx(); App_LineLapReset(&task5LineContext);
+        if (finishSent == 0U) {
+            OPi_SendCmd(OPI_CMD_FINISH);
+            finishSent = 1U;
+        }
+        if (OPi_ReadByte(&b) && b == OPI_ACK_OK) {
+            finishSent = 0U;
+            App_Task5RenderStatus("TASK COMPLETE");
+            state = T5_DONE;
         }
         break; }
+    case T5_DONE:
+        App_VehicleClosedLoopStop();
+        break;
     default: break;
     }
 }
@@ -572,16 +704,24 @@ void App_TasksRun(void)
 
     if (g_active_task != previousTask) {
         App_VehicleClosedLoopStop();
+        if (previousTask == 5U) {
+            Encoder_XZ_Disable();
+            task5OwnsInterface = 0U;
+        }
         App_LineLapReset(&task1LineContext);
         App_LineLapReset(&task3LineContext);
         App_LineLapReset(&task4LineContext);
         App_LineLapReset(&task5LineContext);
+        if (g_active_task == 5U) {
+            task5ResetPending = 1U;
+        }
         previousTask = g_active_task;
     }
 
     switch (g_active_task)
     {
     case 1U: App_Task1Run(); break;
+    case 6U: App_Task1Run(); break;
     case 2U: App_Task2Run(); break;
     case 3U: App_Task3Run(); break;
     case 4U: App_Task4Run(); break;
@@ -840,6 +980,7 @@ void App_Init(void)
     g_bt_command_self_test_failures = BluetoothCommand_RunSelfTest();
     g_bt_command_self_test_complete = 1U;
     App_ElectromagnetInit();
+    Encoder_XZ_Disable();
 
     uart0_init();
     uart0_send_string("BOOT uart0 OK\r\n");
@@ -861,6 +1002,7 @@ void App_Run(void)
 {
     static uint8_t runLoopLogged;
     const bool lineControlCritical = App_LineControlIsTimingCritical();
+    const bool taskOwnsInterface = (task5OwnsInterface != 0U);
 
     if (runLoopLogged == 0U) {
         runLoopLogged = 1U;
@@ -874,7 +1016,7 @@ void App_Run(void)
     if (lineControlCritical) {
         /* 保留按键返回/急停；OLED 全屏软件 I2C 刷新延后到停车后。 */
         App_MenuInputRun();
-    } else {
+    } else if (!taskOwnsInterface) {
         App_MenuRun();
     }
 

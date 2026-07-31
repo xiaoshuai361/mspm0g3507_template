@@ -61,6 +61,9 @@ void App_MenuInitData(void);
 /* 循迹实时阶段仅处理菜单按键，不执行显示数据换算和 OLED 刷新。 */
 void App_MenuInputRun(void);
 
+/* 结束当前任务并返回任务列表，供拥有独立交互页面的任务使用。 */
+void App_MenuReturnToTaskList(void);
+
 /* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
 void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
 

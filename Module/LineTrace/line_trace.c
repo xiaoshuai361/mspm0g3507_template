@@ -14,7 +14,7 @@
                                          LINE_TRACE_OUTER_LEFT_MASK))
 
 static const int16_t lineTraceWeightsTenths[8] = {
-    28, 25, 15, 5, -5, -15, -25, -28
+    32, 29, 12, 5, -5, -12, -29, -32
 }; /**< bit0~bit7 的位置权重，单位 0.1 路间距；右正左负。 */
 
 /**

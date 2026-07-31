@@ -107,6 +107,7 @@ bool Menu_IsDirty(const Menu_State *state);
 bool Menu_IsDynamicPage(const Menu_State *state);
 void Menu_MarkRendered(Menu_State *state);
 void Menu_ForcePage(Menu_State *state, Menu_Page page);
+void Menu_ReturnToTaskList(Menu_State *state);
 void Menu_SetTaskTime(uint16_t seconds);
 
 /**

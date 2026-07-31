@@ -5,11 +5,20 @@
 #include "oled.h"
 
 #define MENU_MAIN_ITEM_COUNT (3U) /**< MENU_MAIN_ITEM_COUNT 应用层配置宏。 */
-#define MENU_TASK_ITEM_COUNT (5U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
+#define MENU_TASK_ITEM_COUNT (6U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
 #define MENU_LINE_LENGTH     (16U) /**< MENU_LINE_LENGTH 应用层配置宏。 */
 
 static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
     "Task Setup", "Speed", "Car Status"
+};
+
+static const char *const taskItems[MENU_TASK_ITEM_COUNT] = {
+    "Task 1F", "Task 1L", "Task 2", "Task 3", "Task 4", "Task 5"
+};
+
+/* Task 1L uses code 6 so the existing Task 2-5 IDs stay unchanged. */
+static const uint8_t taskCodes[MENU_TASK_ITEM_COUNT] = {
+    1U, 6U, 2U, 3U, 4U, 5U
 };
 
 static uint8_t Menu_MoveSelection(uint8_t selection, uint8_t count,
@@ -95,7 +104,7 @@ void Menu_HandleInput(Menu_State *state, Menu_Input input)
         }
 
         if (input == MENU_INPUT_ENTER) {
-            const uint8_t selectedTask = (uint8_t) (state->taskSelection + 1U);
+            const uint8_t selectedTask = taskCodes[state->taskSelection];
             if (state->activeTask != selectedTask) {
                 state->activeTask = selectedTask;
                 state->dirty = true;
@@ -172,6 +181,13 @@ void Menu_SetTaskTime(uint16_t seconds)
 void Menu_ForcePage(Menu_State *state, Menu_Page page)
 {
     state->page = page;
+    state->dirty = true;
+}
+
+void Menu_ReturnToTaskList(Menu_State *state)
+{
+    state->page = MENU_PAGE_TASKS;
+    state->activeTask = 0U;
     state->dirty = true;
 }
 
@@ -317,10 +333,10 @@ static void Menu_RenderTasks(const Menu_State *state)
 
     for (i = 0U; i < MENU_VISIBLE_LINE_COUNT && (start + i) < MENU_TASK_ITEM_COUNT; i++) {
         uint8_t idx = (uint8_t)(start + i);
-        (void) snprintf(line, sizeof(line), "%c%c Task %u",
+        (void) snprintf(line, sizeof(line), "%c%c %s",
                         (idx == state->taskSelection) ? '>' : ' ',
-                        ((idx + 1U) == state->activeTask) ? '*' : ' ',
-                        (unsigned int) (idx + 1U));
+                        (taskCodes[idx] == state->activeTask) ? '*' : ' ',
+                        taskItems[idx]);
         Menu_DrawLine(i, line);
     }
 }
