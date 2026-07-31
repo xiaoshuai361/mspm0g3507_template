@@ -73,11 +73,13 @@ void GROUP1_IRQHandler(void){
 	if(DL_Interrupt_getStatusGroup(DL_INTERRUPT_GROUP_1,DL_INTERRUPT_GROUP1_GPIOA)){
 		g_encoder_gpioa_isr_count++;
 		uint32_t Encoder_GPIO_Int = DL_GPIO_getEnabledInterruptStatus(Encoder_XZ_PORT,Encoder_XZ_XZ_A_PIN | Encoder_XZ_XZ_B_PIN);
+		uint32_t Encoder_GPIO_State = DL_GPIO_readPins(Encoder_XZ_PORT,
+			Encoder_XZ_XZ_A_PIN | Encoder_XZ_XZ_B_PIN);
 		if (Encoder_GPIO_Int == 0U) {
 			g_encoder_empty_isr_count++;
 		}
-		Read_Encoder_XZ_A=DL_GPIO_readPins(Encoder_XZ_PORT,Encoder_XZ_XZ_A_PIN)!=0?0x01:0x00;
-		Read_Encoder_XZ_B=DL_GPIO_readPins(Encoder_XZ_PORT,Encoder_XZ_XZ_B_PIN)!=0?0x01:0x00;
+		Read_Encoder_XZ_A=(Encoder_GPIO_State & Encoder_XZ_XZ_A_PIN)!=0U?0x01:0x00;
+		Read_Encoder_XZ_B=(Encoder_GPIO_State & Encoder_XZ_XZ_B_PIN)!=0U?0x01:0x00;
 	
 		//通道1 A相
 		if ((Encoder_GPIO_Int & Encoder_XZ_XZ_A_PIN) == Encoder_XZ_XZ_A_PIN){
@@ -128,14 +130,16 @@ void GROUP1_IRQHandler(void){
 		g_encoder_gpiob_isr_count++;
 		
 		uint32_t Encoder_GPIO_Int = DL_GPIO_getEnabledInterruptStatus(Encoder_PORT,Encoder_A_PIN | Encoder_B_PIN | Encoder_C_PIN | Encoder_D_PIN);
+		uint32_t Encoder_GPIO_State = DL_GPIO_readPins(Encoder_PORT,
+			Encoder_A_PIN | Encoder_B_PIN | Encoder_C_PIN | Encoder_D_PIN);
 		if (Encoder_GPIO_Int == 0U) {
 			g_encoder_empty_isr_count++;
 		}
 		
-		Read_Encoder_A=DL_GPIO_readPins(Encoder_PORT,Encoder_A_PIN)!=0?0x01:0x00;
-		Read_Encoder_B=DL_GPIO_readPins(Encoder_PORT,Encoder_B_PIN)!=0?0x01:0x00;
-		Read_Encoder_C=DL_GPIO_readPins(Encoder_PORT,Encoder_C_PIN)!=0?0x01:0x00;
-		Read_Encoder_D=DL_GPIO_readPins(Encoder_PORT,Encoder_D_PIN)!=0?0x01:0x00;
+		Read_Encoder_A=(Encoder_GPIO_State & Encoder_A_PIN)!=0U?0x01:0x00;
+		Read_Encoder_B=(Encoder_GPIO_State & Encoder_B_PIN)!=0U?0x01:0x00;
+		Read_Encoder_C=(Encoder_GPIO_State & Encoder_C_PIN)!=0U?0x01:0x00;
+		Read_Encoder_D=(Encoder_GPIO_State & Encoder_D_PIN)!=0U?0x01:0x00;
 		
         //通道1 左轮A相
 		if ((Encoder_GPIO_Int & Encoder_A_PIN) == Encoder_A_PIN){

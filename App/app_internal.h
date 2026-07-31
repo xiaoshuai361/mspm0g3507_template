@@ -58,6 +58,9 @@ void App_LogKeyPress(Key5D_Key key);
 /* 初始化菜单状态和默认显示参数。 */
 void App_MenuInitData(void);
 
+/* 循迹实时阶段仅处理菜单按键，不执行显示数据换算和 OLED 刷新。 */
+void App_MenuInputRun(void);
+
 /* 将最近一次按键 ADC 值同步到菜单显示数据中。 */
 /**
  * @brief 执行 App  Menu Set Key Adc 功能。

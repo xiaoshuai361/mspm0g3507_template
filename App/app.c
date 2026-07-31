@@ -138,6 +138,22 @@ static App_LineLapContext task3LineContext = {
 static App_LineLapContext task4LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task5LineContext = { .startKeyArmed = 1U };
 
+static bool App_LineControlIsTimingCritical(void)
+{
+    const App_LineLapContext *context = NULL;
+
+    switch (g_active_task) {
+    case 1U: context = &task1LineContext; break;
+    case 3U: context = &task3LineContext; break;
+    case 4U: context = &task4LineContext; break;
+    case 5U: context = &task5LineContext; break;
+    default: return false;
+    }
+
+    return (context->state == APP_LINE_LAP_TRACKING) ||
+           (context->state == APP_LINE_LAP_BRAKING);
+}
+
 static void App_LineLapReset(App_LineLapContext *context)
 {
     context->state = APP_LINE_LAP_IDLE;
@@ -768,17 +784,25 @@ void App_Init(void)
 void App_Run(void)
 {
     static uint8_t runLoopLogged;
+    const bool lineControlCritical = App_LineControlIsTimingCritical();
 
     if (runLoopLogged == 0U) {
         runLoopLogged = 1U;
         uart0_send_string("RUN loop OK\r\n");
     }
 
-    App_BatteryRun();
+    if (!lineControlCritical) {
+        App_BatteryRun();
+    }
     App_ElectromagnetRun();
-    App_MenuRun();
+    if (lineControlCritical) {
+        /* 保留按键返回/急停；OLED 全屏软件 I2C 刷新延后到停车后。 */
+        App_MenuInputRun();
+    } else {
+        App_MenuRun();
+    }
 
-    /* 编码器中断始终开启，无任务时也周期测速（Car Status 需要累计值） */
+    /* 编码器中断始终开启，为速度反馈和 Task3 距离停车周期测速。 */
     {
         static uint8_t encInited;
         if (encInited == 0U) { encInited = 1U; Encoder_Init(); }

@@ -373,14 +373,13 @@ static void Menu_RenderStatus(const Menu_ViewData *data)
     if (data->imuValid) {
         Menu_FormatSigned(line, sizeof(line), "Y", data->yawTenths, 10U, 1U);
         Menu_DrawLine(0U, line);
+        Menu_FormatSigned(line, sizeof(line), "P", data->pitchTenths, 10U, 1U);
+        Menu_DrawLine(1U, line);
+        Menu_FormatSigned(line, sizeof(line), "R", data->rollTenths, 10U, 1U);
+        Menu_DrawLine(2U, line);
     } else {
         Menu_DrawLine(0U, "IMU: OFF");
     }
-
-    (void) snprintf(line, sizeof(line), "L:%ld", (long)data->encoderLeft);
-    Menu_DrawLine(1U, line);
-    (void) snprintf(line, sizeof(line), "R:%ld", (long)data->encoderRight);
-    Menu_DrawLine(2U, line);
 
     if (data->tofValid) {
         (void) snprintf(line, sizeof(line), "TOF:%umm",

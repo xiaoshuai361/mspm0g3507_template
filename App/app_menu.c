@@ -116,15 +116,8 @@ static void App_HandleMenuKeyPress(Key5D_Key key)
     }
 }
 
-/**
- * @brief 运行 OLED 菜单：读取按键、处理菜单输入，并按需刷新动态页面。
- * @param 无。
- * @note 非阻塞周期任务，由 App_Run 或对应调度函数重复调用。
- * @retval 无。
- */
-void App_MenuRun(void)
+static void App_MenuPollInput(uint32_t now)
 {
-    const uint32_t now = BSP_Delay_GetTick();
     Key5D_Event event = KEY5D_EVENT_NONE;
 
     if (App_InputPoll(now, &event))
@@ -135,20 +128,39 @@ void App_MenuRun(void)
             App_HandleMenuKeyPress(App_InputGetStableKey());
         }
     }
+}
 
-    App_UpdateCarSpeedDisplay();
+void App_MenuInputRun(void)
+{
+    App_MenuPollInput(BSP_Delay_GetTick());
+}
 
-    /* 编码器累计值更新到菜单 */
-    menuData.encoderLeft  = Encoder_CumulativeL;
-    menuData.encoderRight = Encoder_CumulativeR;
-
-    if (Menu_IsDirty(&menuState) ||
+/**
+ * @brief 运行 OLED 菜单：读取按键、处理菜单输入，并按需刷新动态页面。
+ * @param 无。
+ * @note 非阻塞周期任务，由 App_Run 或对应调度函数重复调用。
+ * @retval 无。
+ */
+void App_MenuRun(void)
+{
+    const uint32_t now = BSP_Delay_GetTick();
+    const bool shouldRender = Menu_IsDirty(&menuState) ||
         (Menu_IsDynamicPage(&menuState) &&
-         ((uint32_t)(now - lastDisplayTick) >= APP_MENU_DYNAMIC_DISPLAY_PERIOD_MS)))
-    {
-        lastDisplayTick = now;
-        Menu_Render(&menuState, &menuData);
+         ((uint32_t)(now - lastDisplayTick) >=
+          APP_MENU_DYNAMIC_DISPLAY_PERIOD_MS));
+
+    App_MenuPollInput(now);
+
+    if (!shouldRender && !Menu_IsDirty(&menuState)) {
+        return;
     }
+
+    /* 只在即将重绘时换算显示数据，避免主循环空转时反复做软件浮点运算。 */
+    App_UpdateCarSpeedDisplay();
+    menuData.encoderLeft = Encoder_CumulativeL;
+    menuData.encoderRight = Encoder_CumulativeR;
+    lastDisplayTick = now;
+    Menu_Render(&menuState, &menuData);
 }
 
 /* 更新参数查询页显示的 PID 参数，单位为 0.01。 */
