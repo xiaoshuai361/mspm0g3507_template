@@ -6,6 +6,8 @@ enum {
     VOFA_JUSTFLOAT_MAX_CHANNELS = 8U
 };
 
+#define UART0_IO_ENABLED (1U)
+
 static uint8_t uart0TxBuffer[UART0_TX_BUFFER_SIZE];
 static volatile uint16_t uart0TxHead;
 static volatile uint16_t uart0TxTail;
@@ -59,7 +61,7 @@ uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
     uint16_t i;
     uint32_t primask;
 
-    if ((data == NULL) || (len == 0U))
+    if ((UART0_IO_ENABLED == 0U) || (data == NULL) || (len == 0U))
     {
         return 0U;
     }
@@ -127,6 +129,21 @@ void uart3_send_string(const char *str)
  */
 void uart0_init(void)
 {
+    uart0TxHead = 0U;
+    uart0TxTail = 0U;
+
+    if (UART0_IO_ENABLED == 0U)
+    {
+        DL_UART_Main_disableInterrupt(UART_0_INST,
+                                      DL_UART_MAIN_INTERRUPT_RX);
+        DL_UART_Main_disableInterrupt(UART_0_INST,
+                                      DL_UART_MAIN_INTERRUPT_TX);
+        NVIC_DisableIRQ(UART_0_INST_INT_IRQN);
+        NVIC_ClearPendingIRQ(UART_0_INST_INT_IRQN);
+        DL_UART_Main_disable(UART_0_INST);
+        return;
+    }
+
     DL_UART_Main_setTXFIFOThreshold(UART_0_INST,
                                     DL_UART_MAIN_TX_FIFO_LEVEL_EMPTY);
     DL_UART_Main_disableInterrupt(UART_0_INST, DL_UART_MAIN_INTERRUPT_TX);

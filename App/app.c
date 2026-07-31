@@ -282,8 +282,49 @@ static void App_OPiDrainRuntimeStatus(void)
     }
 }
 
+static void App_OPiForwardRxToUart0(void)
+{
+    enum { OPI_FORWARD_BYTES_PER_RUN = 16U };
+    static uint8_t pendingByte;
+    static uint8_t pendingValid;
+    uint8_t count;
+
+    for (count = 0U; count < OPI_FORWARD_BYTES_PER_RUN; count++) {
+        if (pendingValid == 0U) {
+            if (OPi_ReadForwardByte(&pendingByte) == 0U) {
+                break;
+            }
+            pendingValid = 1U;
+        }
+
+        if (uart0_write_nonblocking(&pendingByte, 1U) == 0U) {
+            break;
+        }
+        pendingValid = 0U;
+    }
+}
+
+/*
+ * 香橙派启动完成后发送 AA01。空闲时用 AA10 回应开机握手；其它残留状态
+ * 不属于空闲握手，记录后丢弃，避免带入下一项任务。
+ */
+static void App_OPiHandleIdleHandshake(void)
+{
+    uint8_t code;
+
+    while (OPi_ReadFrame(&code) != 0U) {
+        if (code == OPI_STATUS_BOOT_READY) {
+            OPi_SendCmd(OPI_STATUS_VIDEO_READY);
+        } else {
+            App_OPiLogStatus(code, 0U);
+        }
+    }
+}
+
 static void App_OPiStartTask(uint8_t taskCode)
 {
+    /* 先处理开机帧，再清除其它空闲残留状态。 */
+    App_OPiHandleIdleHandshake();
     OPi_FlushRx();
     OPi_SendCmd(taskCode);
     opiTaskActive = 1U;
@@ -1193,6 +1234,8 @@ void App_Run(void)
         uart0_send_string("RUN loop OK\r\n");
     }
 
+    App_OPiForwardRxToUart0();
+
     if (!lineControlCritical) {
         App_BatteryRun();
     }
@@ -1212,6 +1255,7 @@ void App_Run(void)
 
     /* 无任务时停车；有任务时由 Task 接管 */
     if (g_active_task == 0U) {
+        App_OPiHandleIdleHandshake();
         App_VehicleClosedLoopStop();
     }
 

@@ -16,8 +16,8 @@
 #define OPI_CMD_FINISH      0x0FU
 #define OPI_CMD_ABORT       0xFFU
 
-/* 香橙派发给MSPM0的状态。 */
-#define OPI_STATUS_IDLE           0x00U
+/* 香橙派发给MSPM0的状态；空闲收到AA01后，M0回发AA10完成开机握手。 */
+#define OPI_STATUS_BOOT_READY     0x01U
 #define OPI_STATUS_VIDEO_READY    0x10U
 #define OPI_STATUS_CONTROL_READY  0x11U
 #define OPI_STATUS_CLEANUP_DONE   0x12U
@@ -29,6 +29,7 @@ void OPi_Init(void);
 void OPi_SendCmd(uint8_t code);
 void OPi_SendPosition(int8_t positionTenthsCm);
 uint8_t OPi_ReadFrame(uint8_t *code);
+uint8_t OPi_ReadForwardByte(uint8_t *byte);
 void OPi_FlushRx(void);
 
 #endif
