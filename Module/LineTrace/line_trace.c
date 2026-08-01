@@ -1,11 +1,11 @@
 #include "line_trace.h"
 
 /*
- * 与参考工程一致，D1(bit0) 到 D8(bit7) 使用 -7...+7 权重，
- * 并放大 10 倍保留整数精度。正误差表示黑线位于车体左侧。
+ * 与 ebf012f 一致的对称非线性权重。中心附近保持灵敏，
+ * 从中心向外相邻增量逐步减小。正误差表示黑线位于车体左侧。
  */
 static const int16_t lineWeights[8] = {
-    -70, -50, -30, -10, 10, 30, 50, 70
+    -50, -42, -28, -10, 10, 28, 42, 50
 };
 
 static int16_t LineTrace_AbsInt16(int16_t value)
@@ -79,6 +79,43 @@ uint8_t LineTrace_CountActiveLow(uint8_t raw)
     return count;
 }
 
+CrossLine_Type LineTrace_DetectCrossLine(uint8_t raw, uint8_t activeCount,
+                                         uint16_t *lockoutFrames,
+                                         uint8_t *confirmCount)
+{
+    if ((lockoutFrames != 0) && (*lockoutFrames > 0U)) {
+        (*lockoutFrames)--;
+        return CROSS_LINE_NONE;
+    }
+
+    if (activeCount != 3U) {
+        if (confirmCount != 0) {
+            *confirmCount = 0U;
+        }
+        return CROSS_LINE_NONE;
+    }
+
+    (void)raw;
+    if (lockoutFrames != 0) {
+        *lockoutFrames = 80U;
+    }
+    if (confirmCount != 0) {
+        *confirmCount = 0U;
+    }
+    return CROSS_LINE_DETECTED;
+}
+
+void LineTrace_ResetCrossDetect(uint16_t *lockoutFrames,
+                                uint8_t *confirmCount)
+{
+    if (lockoutFrames != 0) {
+        *lockoutFrames = 0U;
+    }
+    if (confirmCount != 0) {
+        *confirmCount = 0U;
+    }
+}
+
 void LineTrace_ControllerReset(LineTrace_Controller *controller)
 {
     if (controller == 0) {
@@ -86,6 +123,7 @@ void LineTrace_ControllerReset(LineTrace_Controller *controller)
     }
     controller->filteredError = 0;
     controller->lastSteeringError = 0;
+    controller->appliedCorrection = 0.0f;
 }
 
 void LineTrace_ControllerStep(LineTrace_Controller *controller,
@@ -94,11 +132,12 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
                               float cruiseSpeed,
                               LineTrace_ControlOutput *output)
 {
-    int16_t rawDelta;
     int16_t steeringError;
     int16_t errorDiff;
     float minimumSpeed;
     float correctionLimit;
+    float desiredCorrection;
+    float correctionDelta;
 
     if ((controller == 0) || (config == 0) || (output == 0)) {
         return;
@@ -116,18 +155,9 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
         return;
     }
 
-    rawDelta = LineTrace_AbsInt16(
-        (int16_t)(rawError - controller->filteredError));
-
-    /* 大偏差快速跟随，小偏差强滤波，避免直线抖动。 */
-    if ((LineTrace_AbsInt16(rawError) >= config->fastErrorThreshold) ||
-        (rawDelta >= config->fastDeltaThreshold)) {
-        controller->filteredError = (int16_t)(
-            (controller->filteredError + rawError * 2) / 3);
-    } else {
-        controller->filteredError = (int16_t)(
-            (controller->filteredError * 3 + rawError) / 4);
-    }
+    /* 与 ebf012f 一致：约1/3旧值 + 2/3当前值。 */
+    controller->filteredError = (int16_t)(
+        (controller->filteredError + rawError * 2) / 3);
 
     steeringError = LineTrace_ApplyDeadband(controller->filteredError,
                                             config->centerDeadband);
@@ -142,14 +172,28 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
     output->baseTarget = LineTrace_ClampFloat(output->baseTarget,
                                                minimumSpeed, cruiseSpeed);
 
-    output->correction = (float)steeringError * config->steeringKp +
-                         (float)errorDiff * config->steeringKd;
+    desiredCorrection = (float)steeringError * config->steeringKp +
+                        (float)errorDiff * config->steeringKd;
 
-    /* 不允许单轮目标反转，弯道最强时允许内轮降到 0。 */
+    /* 与 ebf012f 一致的修正限幅和20ms单步斜率限制。 */
     correctionLimit = output->baseTarget;
-    output->correction = LineTrace_ClampFloat(output->correction,
-                                               -correctionLimit,
-                                               correctionLimit);
+    if ((config->correctionMax > 0.0f) &&
+        (correctionLimit > config->correctionMax)) {
+        correctionLimit = config->correctionMax;
+    }
+    desiredCorrection = LineTrace_ClampFloat(desiredCorrection,
+                                              -correctionLimit,
+                                              correctionLimit);
+    correctionDelta = desiredCorrection - controller->appliedCorrection;
+    if (config->correctionSlewStep > 0.0f) {
+        correctionDelta = LineTrace_ClampFloat(
+            correctionDelta, -config->correctionSlewStep,
+            config->correctionSlewStep);
+    }
+    controller->appliedCorrection = LineTrace_ClampFloat(
+        controller->appliedCorrection + correctionDelta,
+        -correctionLimit, correctionLimit);
+    output->correction = controller->appliedCorrection;
 
     output->leftTarget = output->baseTarget - output->correction;
     output->rightTarget = output->baseTarget + output->correction;

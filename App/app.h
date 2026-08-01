@@ -120,9 +120,9 @@ void App_VehicleControlRun(void);
 void App_Task1Run(void);
 
 /**
- * @brief Task 2：无停车判断的灰度循迹。
+ * @brief Task 2：带停车线减速停车的灰度循迹。
  * @param 无。
- * @note 丢线保持上一拍目标，不检测停车线。
+ * @note 停车线触发后继续巡线，并逐步降低速度环目标至0。
  * @retval 无。
  */
 void App_Task2Run(void);

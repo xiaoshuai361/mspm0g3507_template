@@ -25,9 +25,26 @@ typedef struct {
     uint32_t phaseStartTick;
 } App_Task1Context;
 
+typedef enum {
+    TASK2_TRACKING = 0,
+    TASK2_STOPPING,
+    TASK2_STOPPED
+} App_Task2Phase;
+
+typedef struct {
+    App_Task2Phase phase;
+    LineTrace_Controller controller;
+    float stopTargetSpeed;
+    uint32_t lastTick;
+    uint32_t stopStartTick;
+    uint16_t crossLockout;
+    uint8_t crossConfirm;
+    int32_t startEncL;
+    int32_t startEncR;
+} App_Task2Context;
+
 static App_Task1Context task1Context;
-static LineTrace_Controller task2Controller;
-static uint32_t task2LastTick;
+static App_Task2Context task2Context;
 
 static float App_MoveToward(float current, float target, float step)
 {
@@ -42,6 +59,11 @@ static float App_MoveToward(float current, float target, float step)
     return current;
 }
 
+static float App_AbsFloat(float value)
+{
+    return (value >= 0.0f) ? value : -value;
+}
+
 static void App_Task1Reset(uint32_t now)
 {
     task1Context.phase = TASK1_RAMP_TO_SPEED;
@@ -53,9 +75,31 @@ static void App_Task1Reset(uint32_t now)
 
 static void App_Task2Reset(uint32_t now)
 {
-    LineTrace_ControllerReset(&task2Controller);
-    task2LastTick = now;
+    task2Context.phase = TASK2_TRACKING;
+    LineTrace_ControllerReset(&task2Context.controller);
+    LineTrace_ResetCrossDetect(&task2Context.crossLockout,
+                               &task2Context.crossConfirm);
+    task2Context.crossLockout = APP_TASK2_CROSS_LOCKOUT_FRAMES;
+    task2Context.stopTargetSpeed = 0.0f;
+    task2Context.lastTick = now;
+    task2Context.stopStartTick = now;
+    task2Context.startEncL = Encoder_CumulativeL;
+    task2Context.startEncR = Encoder_CumulativeR;
     App_VehicleSetLineTelemetry(0xFFU, 0, 0.0f);
+}
+
+static uint32_t App_Task2AverageEncoderDelta(void)
+{
+    int32_t leftDelta = Encoder_CumulativeL - task2Context.startEncL;
+    int32_t rightDelta = Encoder_CumulativeR - task2Context.startEncR;
+
+    if (leftDelta < 0) {
+        leftDelta = -leftDelta;
+    }
+    if (rightDelta < 0) {
+        rightDelta = -rightDelta;
+    }
+    return ((uint32_t)leftDelta + (uint32_t)rightDelta) / 2U;
 }
 
 void App_Task1Run(void)
@@ -131,14 +175,16 @@ void App_Task1Run(void)
 void App_Task2Run(void)
 {
     const uint32_t now = BSP_Delay_GetTick();
+    float controlSpeed = App_VehicleGetCommandSpeed();
+    float measuredSpeed;
     LineTrace_ControlConfig config = {
-        .fastErrorThreshold = APP_LINE_FAST_ERROR,
-        .fastDeltaThreshold = APP_LINE_FAST_DELTA,
         .centerDeadband = APP_LINE_CENTER_DEADBAND,
         .steeringKp = App_VehicleGetLineKp(),
         .steeringKd = APP_LINE_FIXED_KD,
         .curveSlowdownGain = APP_LINE_CURVE_SLOWDOWN_GAIN,
         .minimumSpeedRatio = APP_LINE_MINIMUM_SPEED_RATIO,
+        .correctionMax = APP_LINE_CORRECTION_MAX,
+        .correctionSlewStep = APP_LINE_CORRECTION_SLEW_STEP,
     };
     LineTrace_ControlOutput output;
     int16_t error = 0;
@@ -151,27 +197,70 @@ void App_Task2Run(void)
         App_MenuReturnToTaskList();
         return;
     }
-    if ((uint32_t)(now - task2LastTick) < APP_LINE_CONTROL_PERIOD_MS) {
+    if ((uint32_t)(now - task2Context.lastTick) <
+        APP_LINE_CONTROL_PERIOD_MS) {
         return;
     }
-    task2LastTick += APP_LINE_CONTROL_PERIOD_MS;
+    task2Context.lastTick += APP_LINE_CONTROL_PERIOD_MS;
+
+    if (task2Context.phase == TASK2_STOPPED) {
+        App_VehicleClosedLoopStop();
+        return;
+    }
 
     Grayscale_Read();
     raw = Grayscale_GetRaw();
     hasLine = LineTrace_CalcActiveLowWeightedError(raw, &error,
                                                    &activeCount);
-    (void)activeCount;
-    LineTrace_ControllerStep(&task2Controller, &config, hasLine, error,
-                             App_VehicleGetCommandSpeed(), &output);
+
+    if ((task2Context.phase == TASK2_TRACKING) &&
+        (LineTrace_DetectCrossLine(raw, activeCount,
+                                   &task2Context.crossLockout,
+                                   &task2Context.crossConfirm) ==
+         CROSS_LINE_DETECTED) &&
+        (App_Task2AverageEncoderDelta() >=
+         APP_TASK2_CROSS_MIN_ENC_AVG)) {
+        task2Context.phase = TASK2_STOPPING;
+        task2Context.stopStartTick = now;
+        task2Context.stopTargetSpeed =
+            App_VehicleClosedLoopGetAverageTarget();
+        if (task2Context.stopTargetSpeed <= 0.0f) {
+            task2Context.stopTargetSpeed = App_VehicleGetCommandSpeed();
+        }
+    }
+
+    if (task2Context.phase == TASK2_STOPPING) {
+        task2Context.stopTargetSpeed = App_MoveToward(
+            task2Context.stopTargetSpeed, 0.0f,
+            APP_TASK2_STOP_RAMP_STEP);
+        controlSpeed = task2Context.stopTargetSpeed;
+        measuredSpeed = (App_AbsFloat(Motor1_Speed) +
+                         App_AbsFloat(Motor2_Speed)) * 0.5f;
+
+        if (((controlSpeed == 0.0f) &&
+             (measuredSpeed <= APP_TASK2_STOP_SPEED)) ||
+            ((uint32_t)(now - task2Context.stopStartTick) >=
+             APP_TASK2_STOP_TIMEOUT_MS)) {
+            App_VehicleClosedLoopStop();
+            task2Context.phase = TASK2_STOPPED;
+            return;
+        }
+    }
+
+    LineTrace_ControllerStep(&task2Context.controller, &config, hasLine,
+                             error, controlSpeed, &output);
 
     App_VehicleSetLineTelemetry(raw,
         (output.valid != 0U) ? output.filteredError : error,
         (output.valid != 0U) ? output.correction : 0.0f);
 
-    /* 无停车线、无丢线停车；丢线时完全保持上一拍左右轮目标。 */
+    /* 停车阶段仍按灰度差速巡线，只逐拍降低平均目标速度。 */
     if (output.valid != 0U) {
         App_VehicleClosedLoopSetTarget(output.leftTarget,
                                        output.rightTarget);
+    } else if (task2Context.phase == TASK2_STOPPING) {
+        /* 丢线时不再加速，仍按停车斜坡降到0。 */
+        App_VehicleClosedLoopSetTarget(controlSpeed, controlSpeed);
     }
 }
 
