@@ -602,7 +602,7 @@ static void App_Task5RenderPsSelect(int16_t psTenths)
     OLED_ShowString(0U, 18U, "POS:", 16U, 1U);
     OLED_ShowString(32U, 18U, line, 16U, 1U);
     OLED_ShowString(0U, 42U, "ENC -12.0..+12.0", 8U, 1U);
-    OLED_ShowString(0U, 54U, "RIGHT OK", 8U, 1U);
+    OLED_ShowString(0U, 54U, "R1 EN  R2 GO", 8U, 1U);
     OLED_Refresh();
 }
 
@@ -675,8 +675,11 @@ void App_Task2Run(void)
         TASK3_DONE
     };
     static uint32_t activationGeneration;
+    static uint32_t actionStartTick;
+    static uint16_t lastTimerSeconds;
     static uint8_t state;
     const Key5D_Key stableKey = App_InputGetStableKey();
+    const uint32_t now = BSP_Delay_GetTick();
     uint8_t code;
 
     App_VehicleClosedLoopStop();
@@ -684,6 +687,8 @@ void App_Task2Run(void)
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
         state = TASK3_WAIT_READY;
+        actionStartTick = 0U;
+        lastTimerSeconds = 0U;
         App_OPiStartTask(OPI_CMD_TASK3);
         uart0_send_string("OPI T3: START\r\n");
     }
@@ -701,6 +706,8 @@ void App_Task2Run(void)
             uart0_send_string("OPI T3: READY\r\n");
         } else if ((state == TASK3_WAIT_DONE) &&
                    (code == OPI_STATUS_TASK3_DONE)) {
+            lastTimerSeconds = (uint16_t)((now - actionStartTick) / 1000U);
+            Menu_SetTaskTime(lastTimerSeconds);
             state = TASK3_DONE;
             uart0_send_string("OPI T3: DONE\r\n");
         } else {
@@ -710,39 +717,71 @@ void App_Task2Run(void)
         }
     }
 
+    if (state == TASK3_WAIT_DONE) {
+        const uint16_t seconds = (uint16_t)(
+            (now - actionStartTick) / 1000U);
+
+        if (seconds != lastTimerSeconds) {
+            lastTimerSeconds = seconds;
+            Menu_SetTaskTime(seconds);
+        }
+    }
+
     if ((state == TASK3_WAIT_RIGHT_RELEASE) &&
         (stableKey != KEY5D_KEY_RIGHT)) {
         state = TASK3_ACTION_ARMED;
     } else if ((state == TASK3_ACTION_ARMED) &&
                (stableKey == KEY5D_KEY_RIGHT)) {
         OPi_SendCmd(OPI_CMD_TASK3_ACTION);
+        actionStartTick = now;
+        lastTimerSeconds = 0U;
+        Menu_SetTaskTime(0U);
+        App_MenuForceTimerPage();
         state = TASK3_WAIT_DONE;
         uart0_send_string("OPI T3: ACTION\r\n");
     }
 }
 
-/* OLED Task 4: send AA 04 once, then run the existing A-to-B control. */
+/* OLED Task 4: first RIGHT sends AA04; after release, the next RIGHT starts
+ * the car task and timer. */
 void App_Task3Run(void)
 {
     static uint32_t activationGeneration;
+    const Key5D_Key stableKey = App_InputGetStableKey();
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
         App_OPiStartTask(OPI_CMD_TASK4);
+        task3LineContext.startKeyArmed = 0U;
+        uart0_send_string("OPI T4: ENABLE, WAIT OPERATOR\r\n");
+    }
+    if (stableKey == KEY5D_KEY_LEFT) {
+        App_OPiAbortCurrentTask();
+        App_MenuReturnToTaskList();
+        return;
     }
     App_OPiDrainRuntimeStatus();
     App_LineLapRun(&task3LineContext, &task2StableControlConfig,
                    4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
 }
 
-/* OLED Task 5: send AA 05 once, then run the existing line control. */
+/* OLED Task 5: first RIGHT sends AA05; after release, the next RIGHT starts
+ * the car task and timer. */
 void App_Task4Run(void)
 {
     static uint32_t activationGeneration;
+    const Key5D_Key stableKey = App_InputGetStableKey();
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
         App_OPiStartTask(OPI_CMD_TASK5);
+        task4LineContext.startKeyArmed = 0U;
+        uart0_send_string("OPI T5: ENABLE, WAIT OPERATOR\r\n");
+    }
+    if (stableKey == KEY5D_KEY_LEFT) {
+        App_OPiAbortCurrentTask();
+        App_MenuReturnToTaskList();
+        return;
     }
     App_OPiDrainRuntimeStatus();
     App_LineLapRun(&task4LineContext, &task56ControlConfig,
@@ -750,10 +789,16 @@ void App_Task4Run(void)
                    APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
 }
 
-/* OLED Task 6: confirm the encoder position with AA 06 POS. */
+/* OLED Task 6: enter the position page with one menu press.  On that page,
+ * the first RIGHT sends AA06+POS and the second RIGHT starts car motion. */
 void App_Task5Run(void)
 {
-    enum { T6_SELECT_POSITION, T6_TRACK };
+    enum {
+        T6_SELECT_POSITION,
+        T6_WAIT_RUN_RELEASE,
+        T6_READY_TO_RUN,
+        T6_TRACK
+    };
     static uint8_t state = T6_SELECT_POSITION;
     static uint8_t rightKeyArmed;
     static int16_t psTenths;
@@ -808,11 +853,26 @@ void App_Task5Run(void)
             rightKeyArmed = 0U;
             Encoder_XZ_Disable();
             App_OPiStartTask6((int8_t)psTenths);
+            App_Task5RenderStatus("WAIT MOTOR R=GO");
+            state = T6_WAIT_RUN_RELEASE;
+        }
+        break; }
+    case T6_WAIT_RUN_RELEASE:
+        App_VehicleClosedLoopStop();
+        App_OPiDrainRuntimeStatus();
+        if (App_InputGetStableKey() != KEY5D_KEY_RIGHT) {
+            state = T6_READY_TO_RUN;
+        }
+        break;
+    case T6_READY_TO_RUN:
+        App_VehicleClosedLoopStop();
+        App_OPiDrainRuntimeStatus();
+        if (App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
             App_LineLapStart(&task5LineContext, 6U);
             task5OwnsInterface = 0U;
             state = T6_TRACK;
         }
-        break; }
+        break;
     case T6_TRACK:
         App_OPiDrainRuntimeStatus();
         App_LineLapRun(&task5LineContext, &task56ControlConfig,

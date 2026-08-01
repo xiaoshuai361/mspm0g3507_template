@@ -13,6 +13,7 @@
 #define OPI_CMD_TASK3          0x03U  /**< 启动 Task3（专用位置控制 0cm）。 */
 #define OPI_CMD_TASK4          0x04U  /**< 启动 Task4（视觉PD+IMU 0cm）。 */
 #define OPI_CMD_TASK5          0x05U  /**< 启动 Task5（视觉PD+IMU 0cm）。 */
+#define OPI_CMD_TASK6          0x06U  /**< 启动 Task6，后跟有符号位置参数 POS。 */
 #define OPI_CMD_TASK3_ACTION   0x07U  /**< Task3 已稳定后执行 +5cm → -5cm 动作。 */
 #define OPI_CMD_ABORT          0xFFU  /**< 当前任务立即失能。 */
 
