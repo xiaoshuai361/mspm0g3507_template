@@ -304,6 +304,36 @@ float App_VehicleClosedLoopGetAverageTarget(void)
 }
 
 /**
+ * @brief 切换 Task 5/6 专用速度 PID 参数或恢复默认参数。
+ * @param enable true 切换到钢球任务参数，false 恢复默认竞速参数。
+ * @note 仅在 App_VehicleInit() 初始化默认参数后调用有效。切换后不重置积分累加项，
+ *       由 App_TasksRun() 中 App_VehicleClosedLoopStop() 统一清零。
+ * @retval 无。
+ */
+void App_VehicleSetSpeedPidForTask56(bool enable)
+{
+    if (enable)
+    {
+        leftSpeedPid.Kp  = APP_VEHICLE_TASK56_KP_L;
+        leftSpeedPid.Ki  = APP_VEHICLE_TASK56_KI_L;
+        leftSpeedPid.Kd  = APP_VEHICLE_TASK56_KD_L;
+        rightSpeedPid.Kp = APP_VEHICLE_TASK56_KP_R;
+        rightSpeedPid.Ki = APP_VEHICLE_TASK56_KI_R;
+        rightSpeedPid.Kd = APP_VEHICLE_TASK56_KD_R;
+    }
+    else
+    {
+        leftSpeedPid.Kp  = 11.5f;
+        leftSpeedPid.Ki  = 0.3f;
+        leftSpeedPid.Kd  = 0.1f;
+        rightSpeedPid.Kp = 10.0f;
+        rightSpeedPid.Ki = 0.3f;
+        rightSpeedPid.Kd = 0.1f;
+    }
+    App_VehiclePublishPidParameters();
+}
+
+/**
  * @brief 初始化编码器和车辆控制状态。
  * @param 无。
  * @note UART2由香橙派协议独占；这里只初始化编码器和PID状态。

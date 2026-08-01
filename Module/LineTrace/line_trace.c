@@ -305,8 +305,6 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
             desiredBase = config->lostPwm;
         }
     } else {
-        int16_t searchMagnitude;
-
         if (controller->lostFrames < UINT16_MAX) {
             controller->lostFrames++;
         }
@@ -316,27 +314,12 @@ void LineTrace_ControllerStep(LineTrace_Controller *controller,
             output->shouldStop = 1U;
         }
 
-        if (controller->lostFrames <= config->lostHoldFrames) {
-            steeringError = LineTrace_ApplyDeadband(
-                controller->filteredError, config->centerDeadband);
-        } else if (controller->lastDirection != 0) {
-            uint16_t searchFrames = (uint16_t)(
-                controller->lostFrames - config->lostHoldFrames - 1U);
-            uint8_t stepFrames = (config->lostSearchStepFrames == 0U)
-                ? 1U : config->lostSearchStepFrames;
+        /* 丢线时保持最后扫到的权值方向巡线，不切换搜索模式。 */
+        steeringError = LineTrace_ApplyDeadband(
+            controller->filteredError, config->centerDeadband);
 
-            searchMagnitude = (int16_t)(config->lostSearchStartError +
-                (int16_t)(searchFrames / stepFrames));
-            if (searchMagnitude > 35) {
-                searchMagnitude = 35;
-            }
-            steeringError = (int16_t)(
-                searchMagnitude * controller->lastDirection);
-        } else {
-            steeringError = 0;
-        }
-
-        desiredBase = config->lostPwm;
+        /* 丢线时保持原速，不降速到 lostPwm。 */
+        desiredBase = config->cruisePwm;
     }
 
     controller->basePwm = LineTrace_MoveToward(

@@ -178,6 +178,11 @@ void Menu_SetTaskTime(uint16_t seconds)
     g_timerSeconds = seconds;
 }
 
+uint16_t Menu_GetTaskTime(void)
+{
+    return g_timerSeconds;
+}
+
 void Menu_ForcePage(Menu_State *state, Menu_Page page)
 {
     state->page = page;
@@ -379,7 +384,8 @@ static void Menu_RenderParameters(const Menu_ViewData *data)
 /**
  * @brief 渲染小车状态页面。
  * @param data 数据缓冲区。
- * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
+ * @note 第一二行显示 IMU yaw/pitch，第三行显示左右轮累计编码器平均值，
+ *       第四行显示 ToF 距离。
  * @retval 无。
  */
 static void Menu_RenderStatus(const Menu_ViewData *data)
@@ -391,10 +397,19 @@ static void Menu_RenderStatus(const Menu_ViewData *data)
         Menu_DrawLine(0U, line);
         Menu_FormatSigned(line, sizeof(line), "P", data->pitchTenths, 10U, 1U);
         Menu_DrawLine(1U, line);
-        Menu_FormatSigned(line, sizeof(line), "R", data->rollTenths, 10U, 1U);
-        Menu_DrawLine(2U, line);
     } else {
         Menu_DrawLine(0U, "IMU: OFF");
+    }
+
+    /* 累计编码器平均值：不跳变 */
+    {
+        int32_t avg = (data->encoderLeft + data->encoderRight) / 2;
+        char signM = (avg >= 0) ? '+' : '-';
+        int32_t absM = (avg >= 0) ? avg : -avg;
+
+        (void)snprintf(line, sizeof(line), "EncM:%c%ld",
+                       signM, (long)absM);
+        Menu_DrawLine(2U, line);
     }
 
     if (data->tofValid) {

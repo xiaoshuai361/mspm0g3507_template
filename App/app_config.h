@@ -31,7 +31,10 @@
 #define APP_TASK1_BRAKE_PWM (1000)          /**< Task 1停车线触发后的反向制动 PWM。 */
 #define APP_TASK1_BRAKE_DURATION_MS (190U) /**< Task 1反向制动持续时间。 */
 #define APP_TASK1_BRAKE_DELAY_PULSES (0U)  /**< 检测停车线后继续前进的左右编码器绝对增量之和；0=立即制动。 */
+#define APP_TASK2_CROSS_MIN_ENC_AVG (23000) /**< Task 2 两轮平均编码器增量阈值，超过后才启用横切线停车判断，防止起步误触发。 */
+#define APP_TASK2_SLOW_STOP_DURATION_MS (600U) /**< Task 2 检测停车线后巡线减速缓停时间，替代反向PWM制动。 */
 #define APP_TASK56_SLOW_STOP_DURATION_MS (800U) /**< Task 5/6扫到停车线后的闭环缓停时间。 */
+#define APP_VEHICLE_TASK56_SPEED (123.0f)  /**< Task 5/6 钢球任务目标速度，比默认150.0低约18%。 */
 
 #define APP_VEHICLE_DEFAULT_SPEED (150.0f)  /**< f62ded5 整定后的车辆默认目标速度。 */
 #define APP_TASK1_LOW_SPEED (100.0f)        /**< OLED Task 2L闭环速度换算基准。 */
@@ -51,5 +54,15 @@
 #define APP_VEHICLE_PID_OUT_MIN (-1800.0f) /**< 速度 PID 输出下限。 */
 #define APP_VEHICLE_PID_ERR_MAX (120.0f)   /**< 速度 PID 误差限幅。 */
 #define APP_VEHICLE_PID_DELTA_MAX (500.0f) /**< 速度 PID 单次输出变化限幅。 */
+
+/* Task 5/6 钢球稳定任务独立速度PID参数。
+ * 钢球任务负载惯性大、速度低，比例和积分系数需单独整定以避免振荡。
+ * 左右轮系数分开，适配机械不对称和球仓重心偏移。 */
+#define APP_VEHICLE_TASK56_KP_L (9.0f)    /**< Task 5/6 左轮 Kp。 */
+#define APP_VEHICLE_TASK56_KI_L (0.30f)   /**< Task 5/6 左轮 Ki。 */
+#define APP_VEHICLE_TASK56_KD_L (0.1f)   /**< Task 5/6 左轮 Kd。 */
+#define APP_VEHICLE_TASK56_KP_R (8.0f)    /**< Task 5/6 右轮 Kp。 */
+#define APP_VEHICLE_TASK56_KI_R (0.30f)   /**< Task 5/6 右轮 Ki。 */
+#define APP_VEHICLE_TASK56_KD_R (0.1f)   /**< Task 5/6 右轮 Kd。 */
 
 #endif

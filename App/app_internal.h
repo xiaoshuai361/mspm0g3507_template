@@ -85,4 +85,8 @@ float App_VehicleClosedLoopGetAverageTarget(void);
  */
 void App_MenuSetKeyAdc(uint16_t rawAdc);
 
+/* 切换到 Task 5/6 专用速度 PID 参数，或恢复默认竞速参数。
+ * 钢球任务负载惯性大，需要独立整定的 Kp/Ki/Kd。 */
+void App_VehicleSetSpeedPidForTask56(bool enable);
+
 #endif

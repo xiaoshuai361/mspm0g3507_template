@@ -102,19 +102,19 @@ static const LineTrace_ControlConfig task1FastControlConfig = {
     .rampDownStep = 20,          /* 限制每帧降速，避免短时抖动造成骤降。 */
     .curveSlowdownGain = 8,      /* 每单位绝对偏差扣除的PWM；增大可降低弯速。 */
     .slowdownEntryError = 10,    /* 小偏差只纠偏，不降低巡航基准。 */
-    .steeringKp = 15,             /* 全偏差范围线性增益；避免外侧差速跨阈值突变。 */
+    .steeringKp = 16,            /* 全偏差范围线性增益；避免外侧差速跨阈值突变。 */
     .steeringMax = 480,          /* 放宽高速档差速修正硬上限。 */
     .steeringSlewStep = 60,      /* 每10ms差速最多变化60，避免偏差突变时瞬间反打。 */
     .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
     .rightTurnBoost = 115,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
     .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
     .fastErrorThreshold = 15,    /* 原始偏差达到此值使用3/4新值快滤波；减小响应更快。 */
-    .fastDeltaThreshold = 12,    /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
+    .fastDeltaThreshold = 8,    /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
     .lostSearchStartError = 18,  /* 丢线搜索的初始等效偏差；增大则首次找线转向更强。 */
     .lostSearchStepFrames = 2U,  /* 搜索偏差每隔多少帧加1；减小会更快增强搜索。 */
-    .lostHoldFrames = 1U,        /* 丢线后保持最后纠偏的帧数；当前1帧即10ms。 */
+    .lostHoldFrames = 5U,        /* 丢线后保持最后纠偏的帧数；当前1帧即10ms。 */
     .slowdownConfirmFrames = 3U, /* 偏差持续30ms才开始降速，滤除瞬时抖动。 */
-    .lostStopFrames = 1500U,      /* 连续丢线停车时间；当前150帧即1.5s。 */
+    .lostStopFrames = 1500U,     /* 连续丢线停车时间；当前150帧即1.5s。 */
 };
 
 static const LineTrace_ControlConfig task2StableControlConfig = {
@@ -135,6 +135,29 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
     .lostSearchStartError = 16,
     .lostSearchStepFrames = 3U,
     .lostHoldFrames = 2U,
+    .slowdownConfirmFrames = 2U,
+    .lostStopFrames = 150U,
+};
+
+/* Task 5/6 钢球稳定任务：纠偏参数向快速版靠拢，保留缓慢起步防止球滚落。 */
+static const LineTrace_ControlConfig task56ControlConfig = {
+    .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
+    .lostPwm = 650,
+    .rampUpStep = 20,            /* 恢复缓慢起步，钢球任务避免急加速球滚落。 */
+    .rampDownStep = 20,
+    .curveSlowdownGain = 3,
+    .slowdownEntryError = 9,
+    .steeringKp = 15,            /* 逼近快速版16，提升小偏差响应。 */
+    .steeringMax = 400,          /* 逼近快速版480，弯道差速不再受限。 */
+    .steeringSlewStep = 55,      /* 逼近快速版60，差速变化更快。 */
+    .leftPwmBias = 45,
+    .rightTurnBoost = 100,       /* 逼近快速版115，右弯外轮扭矩补偿。 */
+    .centerDeadband = 5,
+    .fastErrorThreshold = 15,
+    .fastDeltaThreshold = 10,    /* 逼近快速版8，突变响应更快。 */
+    .lostSearchStartError = 17,
+    .lostSearchStepFrames = 2U,  /* 同快速版，丢线搜索加速。 */
+    .lostHoldFrames = 3U,
     .slowdownConfirmFrames = 2U,
     .lostStopFrames = 150U,
 };
@@ -398,13 +421,42 @@ static void App_LineLapRun(App_LineLapContext *context,
             if (brakePwm > 0) {
                 App_LineApplyBrake(brakePwm);
             } else {
+                /* 慢停+巡线：读取灰度偏差，在减速基础上保持纠偏。 */
+                int16_t corr;
+                float baseSpeed;
+                float remainingRatio;
+
                 if ((uint32_t)(now - context->lastTick) <
                     APP_LINE_CONTROL_PERIOD_MS) {
                     return;
                 }
                 context->lastTick = now;
-                App_LineApplySlowStop(context, elapsedMs,
-                                      brakeDurationMs);
+
+                Grayscale_Read();
+                raw = Grayscale_GetRaw();
+                steeringRaw = LineTrace_FilterActiveLowOuterChannels(
+                    &context->outerFilter, raw,
+                    APP_LINE_OUTER_FILTER_FRAMES);
+                hasLine = LineTrace_CalcActiveLowWeightedError(
+                    steeringRaw, &errorTenths, 0);
+
+                remainingRatio = (float)((uint32_t)brakeDurationMs -
+                    elapsedMs) / (float)brakeDurationMs;
+                baseSpeed = (context->brakeStartLeftTarget +
+                    context->brakeStartRightTarget) * 0.5f *
+                    remainingRatio;
+
+                corr = (int16_t)((int32_t)errorTenths *
+                    (int32_t)(APP_VEHICLE_LINE_DIFF_GAIN * 10.0f) / 10);
+                if (corr > (int16_t)APP_VEHICLE_LINE_DIFF_MAX) {
+                    corr = (int16_t)APP_VEHICLE_LINE_DIFF_MAX;
+                } else if (corr < -(int16_t)APP_VEHICLE_LINE_DIFF_MAX) {
+                    corr = -(int16_t)APP_VEHICLE_LINE_DIFF_MAX;
+                }
+
+                App_VehicleClosedLoopSetTarget(
+                    baseSpeed + (float)corr,
+                    baseSpeed - (float)corr);
             }
         } else {
             App_VehicleClosedLoopStop();
@@ -467,6 +519,17 @@ static void App_LineLapRun(App_LineLapContext *context,
         uint32_t elapsed = (uint32_t)(now - context->startTick);
         char message[40];
 
+        /* Task 2：起步阶段编码器平均增量未达阈值前忽略横切线，防止起点误触发。 */
+        if (taskNumber == 2U) {
+            int32_t dL = Encoder_CumulativeL - context->startEncL;
+            int32_t dR = Encoder_CumulativeR - context->startEncR;
+            uint32_t avgEnc = (uint32_t)((dL >= 0 ? dL : -dL) +
+                                         (dR >= 0 ? dR : -dR)) / 2U;
+            if (avgEnc < (uint32_t)APP_TASK2_CROSS_MIN_ENC_AVG) {
+                goto skip_cross;
+            }
+        }
+
         if (brakeDurationMs > 0U) {
             if (brakeDelayPulses > 0U) {
                 context->brakePending = 1U;
@@ -489,6 +552,7 @@ static void App_LineLapRun(App_LineLapContext *context,
             return;
         }
     }
+    skip_cross: (void)0;
 
     /* 编码器距离停车(OLED Task 4)：|ΔL|+|ΔR| >= 阈值 → 停车 */
     if (context->stopOnDist != 0U) {
@@ -564,244 +628,49 @@ static void App_Task5ReturnToTaskList(void)
 {
     Encoder_XZ_Disable();
     App_VehicleClosedLoopStop();
-    App_OPiAbortCurrentTask();
-    OPi_FlushRx();
     task5OwnsInterface = 0U;
     App_LineLapReset(&task5LineContext);
     App_MenuReturnToTaskList();
 }
 
-/* OLED Task 2F/2L：等待香橙派视频和钢球就绪后循迹。 */
+/* OLED Task 2F/2L：右键直接启动循迹，跳过OPi通讯协议。 */
 void App_Task1Run(void)
 {
-    enum { T2_SEND, T2_WAIT_VIDEO, T2_WAIT_CONTROL,
-           T2_TRACK, T2_SEND_FINISH, T2_WAIT_CLEANUP, T2_DONE };
-    static uint8_t state = T2_SEND;
-    static uint32_t lastGeneration;
     const float referenceSpeed = (g_active_task == 6U)
                                      ? APP_TASK1_LOW_SPEED
                                      : APP_VEHICLE_DEFAULT_SPEED;
 
-    if (lastGeneration != taskActivationGeneration) {
-        lastGeneration = taskActivationGeneration;
-        state = T2_SEND;
-        App_LineLapReset(&task1LineContext);
-    }
-
-    switch (state) {
-    case T2_SEND:
-        App_VehicleClosedLoopStop();
-        App_OPiStartTask(OPI_CMD_TASK2);
-        state = T2_WAIT_VIDEO;
-        break;
-    case T2_WAIT_VIDEO:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_VIDEO_READY)) {
-            state = T2_WAIT_CONTROL;
-        }
-        break;
-    case T2_WAIT_CONTROL:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CONTROL_READY)) {
-            App_LineLapStart(&task1LineContext, 2U);
-            state = T2_TRACK;
-        }
-        break;
-    case T2_TRACK:
-        App_LineLapRun(&task1LineContext, &task1FastControlConfig, 2U,
-                       referenceSpeed, APP_TASK1_BRAKE_PWM,
-                       APP_TASK1_BRAKE_DURATION_MS,
-                       APP_TASK1_BRAKE_DELAY_PULSES);
-        App_OPiDrainRuntimeStatus();
-        if (task1LineContext.state == APP_LINE_LAP_STOPPED) {
-            state = T2_SEND_FINISH;
-        }
-        break;
-    case T2_SEND_FINISH:
-        OPi_SendCmd(OPI_CMD_FINISH);
-        state = T2_WAIT_CLEANUP;
-        break;
-    case T2_WAIT_CLEANUP:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CLEANUP_DONE)) {
-            App_OPiMarkCleanupDone();
-            state = T2_DONE;
-        }
-        break;
-    case T2_DONE:
-        App_VehicleClosedLoopStop();
-        break;
-    default:
-        state = T2_SEND;
-        break;
-    }
+    App_LineLapRun(&task1LineContext, &task1FastControlConfig, 2U,
+                   referenceSpeed, 0,
+                   APP_TASK2_SLOW_STOP_DURATION_MS,
+                   APP_TASK1_BRAKE_DELAY_PULSES);
 }
 
-/* OLED Task 3：香橙派独立完成0、+5、-5cm控制。 */
+/* OLED Task 3：香橙派独立控制任务，跳过OPi协议后无小车动作。 */
 void App_Task2Run(void)
 {
-    enum { T3_SEND, T3_WAIT_VIDEO, T3_WAIT_CLEANUP, T3_DONE };
-    static uint8_t state = T3_SEND;
-    static uint32_t lastGeneration;
-
-    if (lastGeneration != taskActivationGeneration) {
-        lastGeneration = taskActivationGeneration;
-        state = T3_SEND;
-    }
     App_VehicleClosedLoopStop();
-
-    switch (state) {
-    case T3_SEND:
-        App_OPiStartTask(OPI_CMD_TASK3);
-        state = T3_WAIT_VIDEO;
-        break;
-    case T3_WAIT_VIDEO:
-        if (App_OPiWaitForStatus(OPI_STATUS_VIDEO_READY)) {
-            state = T3_WAIT_CLEANUP;
-        }
-        break;
-    case T3_WAIT_CLEANUP:
-        if (App_OPiWaitForStatus(OPI_STATUS_CLEANUP_DONE)) {
-            App_OPiMarkCleanupDone();
-            state = T3_DONE;
-        }
-        break;
-    case T3_DONE:
-        break;
-    default:
-        state = T3_SEND;
-        break;
-    }
 }
 
-/* OLED Task 4：等待AA10、AA11后执行A到B循迹。 */
+/* OLED Task 4：右键直接启动A到B循迹，跳过OPi通讯协议。 */
 void App_Task3Run(void)
 {
-    enum { T4_SEND, T4_WAIT_VIDEO, T4_WAIT_CONTROL, T4_TRACK,
-           T4_SEND_FINISH, T4_WAIT_CLEANUP, T4_DONE };
-    static uint8_t state = T4_SEND;
-    static uint32_t lastGeneration;
-
-    if (lastGeneration != taskActivationGeneration) {
-        lastGeneration = taskActivationGeneration;
-        state = T4_SEND;
-        App_LineLapReset(&task3LineContext);
-    }
-
-    switch (state) {
-    case T4_SEND:
-        App_VehicleClosedLoopStop();
-        App_OPiStartTask(OPI_CMD_TASK4);
-        state = T4_WAIT_VIDEO;
-        break;
-    case T4_WAIT_VIDEO:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_VIDEO_READY)) {
-            state = T4_WAIT_CONTROL;
-        }
-        break;
-    case T4_WAIT_CONTROL:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CONTROL_READY)) {
-            App_LineLapStart(&task3LineContext, 4U);
-            state = T4_TRACK;
-        }
-        break;
-    case T4_TRACK:
-        App_LineLapRun(&task3LineContext, &task2StableControlConfig,
-                       4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
-        App_OPiDrainRuntimeStatus();
-        if (task3LineContext.state == APP_LINE_LAP_STOPPED) {
-            state = T4_SEND_FINISH;
-        }
-        break;
-    case T4_SEND_FINISH:
-        OPi_SendCmd(OPI_CMD_FINISH);
-        state = T4_WAIT_CLEANUP;
-        break;
-    case T4_WAIT_CLEANUP:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CLEANUP_DONE)) {
-            App_OPiMarkCleanupDone();
-            state = T4_DONE;
-        }
-        break;
-    case T4_DONE:
-        App_VehicleClosedLoopStop();
-        break;
-    default:
-        state = T4_SEND;
-        break;
-    }
+    App_LineLapRun(&task3LineContext, &task2StableControlConfig,
+                   4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
 }
 
-/* OLED Task 5：等待AA10、AA11后循迹，停车线处闭环缓停。 */
+/* OLED Task 5：右键直接启动循迹，停车线处闭环缓停，跳过OPi通讯协议。 */
 void App_Task4Run(void)
 {
-    enum { T5_SEND, T5_WAIT_VIDEO, T5_WAIT_CONTROL, T5_TRACK,
-           T5_SEND_FINISH, T5_WAIT_CLEANUP, T5_DONE };
-    static uint8_t state = T5_SEND;
-    static uint32_t lastGeneration;
-
-    if (lastGeneration != taskActivationGeneration) {
-        lastGeneration = taskActivationGeneration;
-        state = T5_SEND;
-        App_LineLapReset(&task4LineContext);
-    }
-
-    switch (state) {
-    case T5_SEND:
-        App_VehicleClosedLoopStop();
-        App_OPiStartTask(OPI_CMD_TASK5);
-        state = T5_WAIT_VIDEO;
-        break;
-    case T5_WAIT_VIDEO:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_VIDEO_READY)) {
-            state = T5_WAIT_CONTROL;
-        }
-        break;
-    case T5_WAIT_CONTROL:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CONTROL_READY)) {
-            App_LineLapStart(&task4LineContext, 5U);
-            state = T5_TRACK;
-        }
-        break;
-    case T5_TRACK:
-        App_LineLapRun(&task4LineContext, &task2StableControlConfig,
-                       5U, APP_VEHICLE_DEFAULT_SPEED, 0,
-                       APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
-        App_OPiDrainRuntimeStatus();
-        if (task4LineContext.state == APP_LINE_LAP_STOPPED) {
-            state = T5_SEND_FINISH;
-        }
-        break;
-    case T5_SEND_FINISH:
-        OPi_SendCmd(OPI_CMD_FINISH);
-        state = T5_WAIT_CLEANUP;
-        break;
-    case T5_WAIT_CLEANUP:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CLEANUP_DONE)) {
-            App_OPiMarkCleanupDone();
-            state = T5_DONE;
-        }
-        break;
-    case T5_DONE:
-        App_VehicleClosedLoopStop();
-        break;
-    default:
-        state = T5_SEND;
-        break;
-    }
+    App_LineLapRun(&task4LineContext, &task56ControlConfig,
+                   5U, APP_VEHICLE_TASK56_SPEED, 0,
+                   APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
 }
 
-/* OLED Task 6：AA06 → AA10 → AA16 POS → AA11 → 行车。 */
+/* OLED Task 6：编码器选择位置，右键直接启动行车，跳过OPi通讯协议。 */
 void App_Task5Run(void)
 {
-    enum { T6_SELECT_POSITION, T6_WAIT_VIDEO, T6_WAIT_CONTROL,
-           T6_TRACK, T6_SEND_FINISH, T6_WAIT_CLEANUP, T6_DONE };
+    enum { T6_SELECT_POSITION, T6_TRACK };
     static uint8_t state = T6_SELECT_POSITION;
     static uint8_t rightKeyArmed;
     static int16_t psTenths;
@@ -819,7 +688,6 @@ void App_Task5Run(void)
         Encoder_XZ_SetValue(0);
         Encoder_XZ_Enable();
         task5OwnsInterface = 1U;
-        OPi_FlushRx();
         App_LineLapReset(&task5LineContext);
     }
 
@@ -839,7 +707,6 @@ void App_Task5Run(void)
     case T6_SELECT_POSITION: {
         const uint32_t now = BSP_Delay_GetTick();
         const Key5D_Key stableKey = App_InputGetStableKey();
-        char message[40];
 
         App_VehicleClosedLoopStop();
         psTenths = (int16_t)Encoder_XZ_GetClampedValue(
@@ -857,56 +724,19 @@ void App_Task5Run(void)
         } else if (rightKeyArmed != 0U) {
             rightKeyArmed = 0U;
             Encoder_XZ_Disable();
-            App_OPiStartTask(OPI_CMD_TASK6);
-            App_Task5FormatTenths(message, sizeof(message), psTenths);
-            uart0_send_string("T6 POS=");
-            uart0_send_string(message);
-            uart0_send_string("\r\n");
-            App_Task5RenderStatus("WAIT VIDEO");
-            state = T6_WAIT_VIDEO;
-        }
-        break; }
-    case T6_WAIT_VIDEO:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_VIDEO_READY)) {
-            OPi_SendPosition((int8_t)psTenths);
-            App_Task5RenderStatus("WAIT CONTROL");
-            state = T6_WAIT_CONTROL;
-        }
-        break;
-    case T6_WAIT_CONTROL:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CONTROL_READY)) {
             App_LineLapStart(&task5LineContext, 6U);
             task5OwnsInterface = 0U;
             state = T6_TRACK;
         }
-        break;
+        break; }
     case T6_TRACK:
-        App_LineLapRun(&task5LineContext, &task2StableControlConfig,
-                       6U, APP_VEHICLE_DEFAULT_SPEED, 0,
+        App_LineLapRun(&task5LineContext, &task56ControlConfig,
+                       6U, APP_VEHICLE_TASK56_SPEED, 0,
                        APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
-        App_OPiDrainRuntimeStatus();
         if (task5LineContext.state == APP_LINE_LAP_STOPPED) {
             task5OwnsInterface = 1U;
-            state = T6_SEND_FINISH;
+            state = T6_SELECT_POSITION;
         }
-        break;
-    case T6_SEND_FINISH:
-        OPi_SendCmd(OPI_CMD_FINISH);
-        App_Task5RenderStatus("WAIT CLEANUP");
-        state = T6_WAIT_CLEANUP;
-        break;
-    case T6_WAIT_CLEANUP:
-        App_VehicleClosedLoopStop();
-        if (App_OPiWaitForStatus(OPI_STATUS_CLEANUP_DONE)) {
-            App_OPiMarkCleanupDone();
-            App_Task5RenderStatus("TASK COMPLETE");
-            state = T6_DONE;
-        }
-        break;
-    case T6_DONE:
-        App_VehicleClosedLoopStop();
         break;
     default:
         state = T6_SELECT_POSITION;
@@ -924,9 +754,6 @@ void App_TasksRun(void)
     static uint8_t previousTask;
 
     if (g_active_task != previousTask) {
-        if (previousTask != 0U) {
-            App_OPiAbortCurrentTask();
-        }
         taskActivationGeneration++;
         App_VehicleClosedLoopStop();
         if (previousTask == 5U) {
@@ -940,6 +767,11 @@ void App_TasksRun(void)
         if (g_active_task == 5U) {
             task5ResetPending = 1U;
         }
+
+        /* Task 4/5(OLED Task 5/6)钢球任务使用独立速度PID参数。 */
+        App_VehicleSetSpeedPidForTask56(
+            (g_active_task == 4U) || (g_active_task == 5U));
+
         previousTask = g_active_task;
     }
 
@@ -1241,8 +1073,21 @@ void App_Run(void)
     }
     App_ElectromagnetRun();
     if (lineControlCritical) {
-        /* 保留按键返回/急停；OLED 全屏软件 I2C 刷新延后到停车后。 */
+        /* 保留按键返回/急停；每1s刷新一次计时器 OLED（不刷新菜单其他页面）。 */
         App_MenuInputRun();
+        {
+            static uint16_t lastRenderedSec = 0xFFFFU;
+            const uint16_t currentSec = Menu_GetTaskTime();
+            if (currentSec != lastRenderedSec) {
+                char line[17];
+                lastRenderedSec = currentSec;
+                OLED_ClearBuffer();
+                (void)snprintf(line, sizeof(line), "Time:%us",
+                               (unsigned int)currentSec);
+                OLED_ShowString(0U, 0U, line, 16U, 1U);
+                OLED_Refresh();
+            }
+        }
     } else if (!taskOwnsInterface) {
         App_MenuRun();
     }
