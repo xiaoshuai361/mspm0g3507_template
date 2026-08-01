@@ -173,8 +173,8 @@ static uint8_t opiTaskActive;
 static uint32_t taskActivationGeneration;
 
 enum {
-    TASK6_POSITION_MIN_TENTHS = -120,
-    TASK6_POSITION_MAX_TENTHS = 120
+    TASK6_POSITION_MIN_TENTHS = -125,
+    TASK6_POSITION_MAX_TENTHS = 125
 };
 
 static bool App_LineControlIsTimingCritical(void)
@@ -283,19 +283,6 @@ static void App_OPiLogStatus(uint8_t code, uint8_t expected)
     uart0_send_string(message);
 }
 
-static bool App_OPiWaitForStatus(uint8_t expected)
-{
-    uint8_t code;
-
-    while (OPi_ReadFrame(&code) != 0U) {
-        if (code == expected) {
-            return true;
-        }
-        App_OPiLogStatus(code, expected);
-    }
-    return false;
-}
-
 static void App_OPiDrainRuntimeStatus(void)
 {
     uint8_t code;
@@ -331,7 +318,7 @@ static void App_OPiForwardRxToUart0(void)
  * 香橙派启动完成后发送 AA01。M0只接收并消费此帧，不发送握手回包；
  * 其它残留状态记录后丢弃，避免带入下一项任务。
  */
-static void App_OPiHandleIdleHandshake(void)
+static void App_OPiDrainIdleStatus(void)
 {
     uint8_t code;
 
@@ -346,16 +333,19 @@ static void App_OPiHandleIdleHandshake(void)
 
 static void App_OPiStartTask(uint8_t taskCode)
 {
-    /* 先处理开机帧，再清除其它空闲残留状态。 */
-    App_OPiHandleIdleHandshake();
+    /* Consume the one-shot boot status and discard stale task statuses. */
+    App_OPiDrainIdleStatus();
     OPi_FlushRx();
     OPi_SendCmd(taskCode);
     opiTaskActive = 1U;
 }
 
-static void App_OPiMarkCleanupDone(void)
+static void App_OPiStartTask6(int8_t positionTenthsCm)
 {
-    opiTaskActive = 0U;
+    App_OPiDrainIdleStatus();
+    OPi_FlushRx();
+    OPi_SendTask6(positionTenthsCm);
+    opiTaskActive = 1U;
 }
 
 static void App_OPiAbortCurrentTask(void)
@@ -633,12 +623,40 @@ static void App_Task5ReturnToTaskList(void)
     App_MenuReturnToTaskList();
 }
 
-/* OLED Task 2F/2L：右键直接启动循迹，跳过OPi通讯协议。 */
+/* OLED Task 2F/2L: the selection key starts OPI Task2.  After the
+ * operator releases it, the next RIGHT press starts driving and timing. */
 void App_Task1Run(void)
 {
+    enum { TASK2_WAIT_RIGHT_RELEASE, TASK2_READY_TO_RUN };
+    static uint32_t activationGeneration;
+    static uint8_t state;
     const float referenceSpeed = (g_active_task == 6U)
                                      ? APP_TASK1_LOW_SPEED
                                      : APP_VEHICLE_DEFAULT_SPEED;
+    const Key5D_Key stableKey = App_InputGetStableKey();
+
+    if (activationGeneration != taskActivationGeneration) {
+        activationGeneration = taskActivationGeneration;
+        state = TASK2_WAIT_RIGHT_RELEASE;
+        App_OPiStartTask(OPI_CMD_TASK2);
+        uart0_send_string("OPI T2: START, WAIT OPERATOR\r\n");
+    }
+
+    App_OPiDrainRuntimeStatus();
+
+    if (stableKey == KEY5D_KEY_LEFT) {
+        App_OPiAbortCurrentTask();
+        App_MenuReturnToTaskList();
+        return;
+    }
+
+    if (state == TASK2_WAIT_RIGHT_RELEASE) {
+        App_VehicleClosedLoopStop();
+        if (stableKey != KEY5D_KEY_RIGHT) {
+            state = TASK2_READY_TO_RUN;
+        }
+        return;
+    }
 
     App_LineLapRun(&task1LineContext, &task1FastControlConfig, 2U,
                    referenceSpeed, 0,
@@ -646,28 +664,93 @@ void App_Task1Run(void)
                    APP_TASK1_BRAKE_DELAY_PULSES);
 }
 
-/* OLED Task 3：香橙派独立控制任务，跳过OPi协议后无小车动作。 */
+/* OLED Task 3: AA 03 -> AA 11 -> AA 07 -> AA 12. */
 void App_Task2Run(void)
 {
+    enum {
+        TASK3_WAIT_READY,
+        TASK3_WAIT_RIGHT_RELEASE,
+        TASK3_ACTION_ARMED,
+        TASK3_WAIT_DONE,
+        TASK3_DONE
+    };
+    static uint32_t activationGeneration;
+    static uint8_t state;
+    const Key5D_Key stableKey = App_InputGetStableKey();
+    uint8_t code;
+
     App_VehicleClosedLoopStop();
+
+    if (activationGeneration != taskActivationGeneration) {
+        activationGeneration = taskActivationGeneration;
+        state = TASK3_WAIT_READY;
+        App_OPiStartTask(OPI_CMD_TASK3);
+        uart0_send_string("OPI T3: START\r\n");
+    }
+
+    if (stableKey == KEY5D_KEY_LEFT) {
+        App_OPiAbortCurrentTask();
+        App_MenuReturnToTaskList();
+        return;
+    }
+
+    while (OPi_ReadFrame(&code) != 0U) {
+        if ((state == TASK3_WAIT_READY) &&
+            (code == OPI_STATUS_CONTROL_READY)) {
+            state = TASK3_WAIT_RIGHT_RELEASE;
+            uart0_send_string("OPI T3: READY\r\n");
+        } else if ((state == TASK3_WAIT_DONE) &&
+                   (code == OPI_STATUS_TASK3_DONE)) {
+            state = TASK3_DONE;
+            uart0_send_string("OPI T3: DONE\r\n");
+        } else {
+            App_OPiLogStatus(code,
+                (state == TASK3_WAIT_READY) ? OPI_STATUS_CONTROL_READY :
+                (state == TASK3_WAIT_DONE) ? OPI_STATUS_TASK3_DONE : 0U);
+        }
+    }
+
+    if ((state == TASK3_WAIT_RIGHT_RELEASE) &&
+        (stableKey != KEY5D_KEY_RIGHT)) {
+        state = TASK3_ACTION_ARMED;
+    } else if ((state == TASK3_ACTION_ARMED) &&
+               (stableKey == KEY5D_KEY_RIGHT)) {
+        OPi_SendCmd(OPI_CMD_TASK3_ACTION);
+        state = TASK3_WAIT_DONE;
+        uart0_send_string("OPI T3: ACTION\r\n");
+    }
 }
 
-/* OLED Task 4：右键直接启动A到B循迹，跳过OPi通讯协议。 */
+/* OLED Task 4: send AA 04 once, then run the existing A-to-B control. */
 void App_Task3Run(void)
 {
+    static uint32_t activationGeneration;
+
+    if (activationGeneration != taskActivationGeneration) {
+        activationGeneration = taskActivationGeneration;
+        App_OPiStartTask(OPI_CMD_TASK4);
+    }
+    App_OPiDrainRuntimeStatus();
     App_LineLapRun(&task3LineContext, &task2StableControlConfig,
                    4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
 }
 
-/* OLED Task 5：右键直接启动循迹，停车线处闭环缓停，跳过OPi通讯协议。 */
+/* OLED Task 5: send AA 05 once, then run the existing line control. */
 void App_Task4Run(void)
 {
+    static uint32_t activationGeneration;
+
+    if (activationGeneration != taskActivationGeneration) {
+        activationGeneration = taskActivationGeneration;
+        App_OPiStartTask(OPI_CMD_TASK5);
+    }
+    App_OPiDrainRuntimeStatus();
     App_LineLapRun(&task4LineContext, &task56ControlConfig,
                    5U, APP_VEHICLE_TASK56_SPEED, 0,
                    APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
 }
 
-/* OLED Task 6：编码器选择位置，右键直接启动行车，跳过OPi通讯协议。 */
+/* OLED Task 6: confirm the encoder position with AA 06 POS. */
 void App_Task5Run(void)
 {
     enum { T6_SELECT_POSITION, T6_TRACK };
@@ -724,19 +807,17 @@ void App_Task5Run(void)
         } else if (rightKeyArmed != 0U) {
             rightKeyArmed = 0U;
             Encoder_XZ_Disable();
+            App_OPiStartTask6((int8_t)psTenths);
             App_LineLapStart(&task5LineContext, 6U);
             task5OwnsInterface = 0U;
             state = T6_TRACK;
         }
         break; }
     case T6_TRACK:
+        App_OPiDrainRuntimeStatus();
         App_LineLapRun(&task5LineContext, &task56ControlConfig,
                        6U, APP_VEHICLE_TASK56_SPEED, 0,
                        APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
-        if (task5LineContext.state == APP_LINE_LAP_STOPPED) {
-            task5OwnsInterface = 1U;
-            state = T6_SELECT_POSITION;
-        }
         break;
     default:
         state = T6_SELECT_POSITION;
@@ -760,6 +841,8 @@ void App_TasksRun(void)
             Encoder_XZ_Disable();
             task5OwnsInterface = 0U;
         }
+        /* Every OPI task remains enabled until the operator leaves it. */
+        App_OPiAbortCurrentTask();
         App_LineLapReset(&task1LineContext);
         App_LineLapReset(&task3LineContext);
         App_LineLapReset(&task4LineContext);
@@ -1100,7 +1183,7 @@ void App_Run(void)
 
     /* 无任务时停车；有任务时由 Task 接管 */
     if (g_active_task == 0U) {
-        App_OPiHandleIdleHandshake();
+        App_OPiDrainIdleStatus();
         App_VehicleClosedLoopStop();
     }
 
