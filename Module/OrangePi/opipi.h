@@ -16,7 +16,7 @@
 #define OPI_CMD_FINISH      0x0FU
 #define OPI_CMD_ABORT       0xFFU
 
-/* 香橙派发给MSPM0的状态；空闲收到AA01后，M0回发AA10完成开机握手。 */
+/* 香橙派发给MSPM0的状态；AA01为单向开机就绪通知，M0不回包。 */
 #define OPI_STATUS_BOOT_READY     0x01U
 #define OPI_STATUS_VIDEO_READY    0x10U
 #define OPI_STATUS_CONTROL_READY  0x11U

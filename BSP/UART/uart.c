@@ -7,6 +7,7 @@ enum {
 };
 
 #define UART0_IO_ENABLED (1U)
+#define UART0_LOCAL_OUTPUT_ENABLED (0U)
 
 static uint8_t uart0TxBuffer[UART0_TX_BUFFER_SIZE];
 static volatile uint16_t uart0TxHead;
@@ -55,7 +56,8 @@ static void uart0_tx_service(void)
     }
 }
 
-uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
+static uint8_t uart0_queue_write_nonblocking(const uint8_t *data,
+                                              uint16_t len)
 {
     uint16_t writeIndex;
     uint16_t i;
@@ -86,6 +88,20 @@ uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
     uart0_tx_service();
     __set_PRIMASK(primask);
     return 1U;
+}
+
+uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
+{
+    if (UART0_LOCAL_OUTPUT_ENABLED == 0U)
+    {
+        return 0U;
+    }
+    return uart0_queue_write_nonblocking(data, len);
+}
+
+uint8_t uart0_bridge_write_nonblocking(const uint8_t *data, uint16_t len)
+{
+    return uart0_queue_write_nonblocking(data, len);
 }
 
 /* ================================================================

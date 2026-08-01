@@ -297,7 +297,7 @@ static void App_OPiForwardRxToUart0(void)
             pendingValid = 1U;
         }
 
-        if (uart0_write_nonblocking(&pendingByte, 1U) == 0U) {
+        if (uart0_bridge_write_nonblocking(&pendingByte, 1U) == 0U) {
             break;
         }
         pendingValid = 0U;
@@ -305,8 +305,8 @@ static void App_OPiForwardRxToUart0(void)
 }
 
 /*
- * 香橙派启动完成后发送 AA01。空闲时用 AA10 回应开机握手；其它残留状态
- * 不属于空闲握手，记录后丢弃，避免带入下一项任务。
+ * 香橙派启动完成后发送 AA01。M0只接收并消费此帧，不发送握手回包；
+ * 其它残留状态记录后丢弃，避免带入下一项任务。
  */
 static void App_OPiHandleIdleHandshake(void)
 {
@@ -314,7 +314,7 @@ static void App_OPiHandleIdleHandshake(void)
 
     while (OPi_ReadFrame(&code) != 0U) {
         if (code == OPI_STATUS_BOOT_READY) {
-            OPi_SendCmd(OPI_STATUS_VIDEO_READY);
+            continue;
         } else {
             App_OPiLogStatus(code, 0U);
         }

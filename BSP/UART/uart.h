@@ -35,6 +35,15 @@ void uart0_send_string(const char *str);
  */
 uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len);
 
+/**
+ * @brief 仅供UART协议桥接使用的非阻塞发送入口。
+ * @param data 待透传的原始字节。
+ * @param len 字节数。
+ * @note 本地日志关闭时此入口仍可发送，确保UART0只输出桥接原始数据。
+ * @retval 1表示成功入队，0表示参数无效或发送队列空间不足。
+ */
+uint8_t uart0_bridge_write_nonblocking(const uint8_t *data, uint16_t len);
+
 /* ======== UART3 灰度传感器数据上传 ========
  * TX=PA14  RX=PA13  波特率 115200
  * 数据格式： GD_S:XX\r\n  (XX 为 16进制原始字节)

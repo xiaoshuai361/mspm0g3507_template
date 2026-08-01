@@ -16,13 +16,17 @@ static volatile uint8_t opiForwardTail;
 
 static void OPi_QueueForwardByte(uint8_t data)
 {
-    const uint8_t nextHead = (uint8_t)(
-        (opiForwardHead + 1U) & OPI_FORWARD_QUEUE_MASK);
+    uint8_t nextHead;
+    uint32_t primask = __get_PRIMASK();
 
+    __disable_irq();
+    nextHead = (uint8_t)((opiForwardHead + 1U) &
+                         OPI_FORWARD_QUEUE_MASK);
     if (nextHead != opiForwardTail) {
         opiForwardQueue[opiForwardHead] = data;
         opiForwardHead = nextHead;
     }
+    __set_PRIMASK(primask);
 }
 
 static void OPi_ParseRxByte(uint8_t data)
@@ -50,6 +54,7 @@ static void OPi_SendByte(uint8_t data)
 {
     while (DL_UART_Main_isBusy(UART_2_INST)) {}
     DL_UART_Main_transmitData(UART_2_INST, data);
+    OPi_QueueForwardByte(data);
 }
 
 void OPi_Init(void)
