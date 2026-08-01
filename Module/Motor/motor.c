@@ -1,35 +1,30 @@
 #include "motor.h"
-int pwmA,pwmB;
+
 static uint8_t motorPwmStarted;
 static int8_t motorLeftDirection;
 static int8_t motorRightDirection;
 
-/* 兼容旧调用，当前不需要额外初始化 */
-void Motor_Init(void) {}
-
-static int Motor_ClampPwm(int pwm)
+static int Motor_ClampSpeedLoopOutput(int output)
 {
-    if (pwm > 1999) {
+    if (output > 1999) {
         return 1999;
     }
-    if (pwm < -1999) {
+    if (output < -1999) {
         return -1999;
     }
-    return pwm;
+    return output;
 }
 
-// 正转：L1=0 L2=1，R1=1 R2=0。
-void Set_Speed(int PWMA, int PWMB)
+/* 唯一接触电机 PWM 寄存器的底层函数，不对模块外公开。 */
+static void Motor_WriteDriverOutput(int leftOutput, int rightOutput)
 {
     int8_t leftDirection;
     int8_t rightDirection;
 
-    PWMA = Motor_ClampPwm(PWMA);
-    PWMB = Motor_ClampPwm(PWMB);
-    pwmA = PWMA;
-    pwmB = PWMB;
-    leftDirection = (PWMA > 0) ? 1 : ((PWMA < 0) ? -1 : 0);
-    rightDirection = (PWMB > 0) ? 1 : ((PWMB < 0) ? -1 : 0);
+    leftOutput = Motor_ClampSpeedLoopOutput(leftOutput);
+    rightOutput = Motor_ClampSpeedLoopOutput(rightOutput);
+    leftDirection = (leftOutput > 0) ? 1 : ((leftOutput < 0) ? -1 : 0);
+    rightDirection = (rightOutput > 0) ? 1 : ((rightOutput < 0) ? -1 : 0);
 
     if (leftDirection != motorLeftDirection) {
         DL_TimerA_setCaptureCompareValue(PWM_MOTOR_INST, 0U,
@@ -64,13 +59,33 @@ void Set_Speed(int PWMA, int PWMB)
     }
 
     DL_TimerA_setCaptureCompareValue(PWM_MOTOR_INST,
-        (uint32_t)((PWMA < 0) ? -PWMA : PWMA), DL_TIMER_CC_0_INDEX);
+        (uint32_t)((leftOutput < 0) ? -leftOutput : leftOutput),
+        DL_TIMER_CC_0_INDEX);
     DL_TimerA_setCaptureCompareValue(PWM_MOTOR_INST,
-        (uint32_t)((PWMB < 0) ? -PWMB : PWMB), DL_TIMER_CC_1_INDEX);
+        (uint32_t)((rightOutput < 0) ? -rightOutput : rightOutput),
+        DL_TIMER_CC_1_INDEX);
 
     if (motorPwmStarted == 0U) {
         DL_TimerA_enableClock(PWM_MOTOR_INST);
         DL_TimerA_startCounter(PWM_MOTOR_INST);
         motorPwmStarted = 1U;
     }
+}
+
+void Motor_ApplySpeedLoopOutput(int leftPidOutput, int rightPidOutput)
+{
+    Motor_WriteDriverOutput(leftPidOutput, rightPidOutput);
+}
+
+void Motor_Stop(void)
+{
+    DL_TimerA_setCaptureCompareValue(PWM_MOTOR_INST, 0U,
+                                     DL_TIMER_CC_0_INDEX);
+    DL_TimerA_setCaptureCompareValue(PWM_MOTOR_INST, 0U,
+                                     DL_TIMER_CC_1_INDEX);
+    DL_GPIO_clearPins(GPIO_MOTOR_PORT,
+        GPIO_MOTOR_PIN_L1_PIN | GPIO_MOTOR_PIN_L2_PIN |
+        GPIO_MOTOR_PIN_R1_PIN | GPIO_MOTOR_PIN_R2_PIN);
+    motorLeftDirection = 0;
+    motorRightDirection = 0;
 }

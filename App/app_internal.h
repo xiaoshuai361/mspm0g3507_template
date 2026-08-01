@@ -64,12 +64,6 @@ void App_MenuInputRun(void);
 /* 结束当前任务并返回任务列表，供拥有独立交互页面的任务使用。 */
 void App_MenuReturnToTaskList(void);
 
-/* 发布香橙派启动状态，供一级菜单第三行显示 READY。 */
-void App_MenuSetOpiBootReady(bool ready);
-
-/* 发布当前香橙派任务的 AA 11 就绪状态，供任务星号闪烁。 */
-void App_MenuSetTaskControlReady(bool ready);
-
 /* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
 void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
 
@@ -82,6 +76,12 @@ void App_VehicleClosedLoopStop(void);
 /* 获取左右轮闭环目标的平均值，供低频菜单刷新使用。 */
 float App_VehicleClosedLoopGetAverageTarget(void);
 
+void App_VehicleInit(void);
+float App_VehicleGetCommandSpeed(void);
+float App_VehicleGetLineKp(void);
+void App_VehicleSetLineTelemetry(uint8_t raw, int16_t error,
+                                 float correction);
+
 /* 将最近一次按键 ADC 值同步到菜单显示数据中。 */
 /**
  * @brief 执行 App  Menu Set Key Adc 功能。
@@ -90,9 +90,5 @@ float App_VehicleClosedLoopGetAverageTarget(void);
  * @retval 无。
  */
 void App_MenuSetKeyAdc(uint16_t rawAdc);
-
-/* 切换到 Task 5/6 专用速度 PID 参数，或恢复默认竞速参数。
- * 钢球任务负载惯性大，需要独立整定的 Kp/Ki/Kd。 */
-void App_VehicleSetSpeedPidForTask56(bool enable);
 
 #endif

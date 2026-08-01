@@ -96,28 +96,12 @@ void App_ImuRun(void);
 void App_ToFRun(void);
 
 /**
- * @brief 运行车辆相关任务，包括蓝牙、循迹、测速和速度闭环。
+ * @brief 运行 UART0 VOFA、编码器测速和速度闭环。
  * @param 无。
  * @note 非阻塞函数应由 App_Run 或对应周期任务重复调用。
  * @retval 无。
  */
 void App_VehicleRun(void);
-
-/**
- * @brief 运行蓝牙命令处理任务。
- * @param 无。
- * @note 命令 1~7 控制小车手动运动和循迹开关。
- * @retval 无。
- */
-void App_BluetoothRun(void);
-
-/**
- * @brief 读取灰度循迹数据，并在循迹模式下更新目标速度。
- * @param 无。
- * @note 非阻塞函数应由 App_Run 或对应周期任务重复调用。
- * @retval 无。
- */
-void App_LineTraceRun(void);
 
 /**
  * @brief 运行车辆速度闭环控制任务。
@@ -128,49 +112,23 @@ void App_LineTraceRun(void);
 void App_VehicleControlRun(void);
 
 /**
- * @brief 将蓝牙接收到的字节归一化为车辆命令编号。
- * @param rawCommand UART2 收到的原始字节，可为数值 1~7 或 ASCII 字符 '1'~'7'。
- * @note 返回 0 表示不是有效车辆命令。
- * @retval 1~7 为有效命令，0 为无效命令。
- */
-uint8_t App_VehicleNormalizeBluetoothCommand(uint8_t rawCommand);
-
-/**
- * @brief 执行菜单选择的 Task 2F/2L 逻辑。
+ * @brief Task 1：平滑定速往返。
  * @param 无。
- * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 2。
+ * @note 平滑加速后定速 3 秒，再减速至零并换向。
  * @retval 无。
  */
 void App_Task1Run(void);
 
 /**
- * @brief 执行菜单选择的 Task 3 逻辑。
+ * @brief Task 2：无停车判断的灰度循迹。
  * @param 无。
- * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 3。
+ * @note 丢线保持上一拍目标，不检测停车线。
  * @retval 无。
  */
 void App_Task2Run(void);
 
 /**
- * @brief 执行菜单选择的 Task 4 逻辑。
- * @param 无。
- * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 4。
- * @retval 无。
- */
-void App_Task3Run(void);
-
-/**
- * @brief 执行菜单选择的 Task 5 逻辑。
- * @param 无。
- * @note 内部函数名保留兼容性，OLED显示和协议编号均为Task 5。
- * @retval 无。
- */
-void App_Task4Run(void);
-
-void App_Task5Run(void);
-
-/**
- * @brief 根据菜单选择分发执行OLED Task 2~6。
+ * @brief 根据菜单选择分发执行 Task 1/2。
  * @param 无。
  * @note 在 App_Run() 中周期调用；未选择任务时不执行任何任务逻辑。
  * @retval 无。

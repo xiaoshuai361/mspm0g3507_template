@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceFolder,
 
-    [string]$Gmake = "D:\ti\CCS\ccs\utils\bin\gmake.exe",
+    [string]$Gmake = "D:\APPs\TI\CCS\ccs\utils\bin\gmake.exe",
 
     [int]$Jobs = 4
 )

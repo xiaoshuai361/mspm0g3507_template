@@ -49,12 +49,6 @@ VEHICLE_EXTRA_OBJS := \
 VEHICLE_EXTRA_DEPS := \
 ./App/app_vehicle.d
 
-ORANGE_PI_EXTRA_OBJS := \
-./Module/OrangePi/opipi.o
-
-ORANGE_PI_EXTRA_DEPS := \
-./Module/OrangePi/opipi.d
-
 LINE_TRACE_EXTRA_OBJS := \
 ./Module/LineTrace/line_trace.o \
 ./tests/line_trace_test.o
@@ -62,12 +56,6 @@ LINE_TRACE_EXTRA_OBJS := \
 LINE_TRACE_EXTRA_DEPS := \
 ./Module/LineTrace/line_trace.d \
 ./tests/line_trace_test.d
-
-BT_COMMAND_EXTRA_OBJS := \
-./tests/bluetooth_command_test.o
-
-BT_COMMAND_EXTRA_DEPS := \
-./tests/bluetooth_command_test.d
 
 ifeq ($(findstring Module/ToF/dl1b.o,$(ORDERED_OBJS)),)
 OBJS += $(DL1B_EXTRA_OBJS)
@@ -104,23 +92,9 @@ ORDERED_OBJS += \
 $(VEHICLE_EXTRA_OBJS)
 endif
 
-ifeq ($(findstring Module/OrangePi/opipi.o,$(ORDERED_OBJS)),)
-OBJS += $(ORANGE_PI_EXTRA_OBJS)
-C_DEPS += $(ORANGE_PI_EXTRA_DEPS)
-ORDERED_OBJS += \
-$(ORANGE_PI_EXTRA_OBJS)
-endif
-
 ifeq ($(findstring tests/line_trace_test.o,$(ORDERED_OBJS)),)
 OBJS += $(LINE_TRACE_EXTRA_OBJS)
 C_DEPS += $(LINE_TRACE_EXTRA_DEPS)
 ORDERED_OBJS += \
 $(LINE_TRACE_EXTRA_OBJS)
-endif
-
-ifeq ($(findstring tests/bluetooth_command_test.o,$(ORDERED_OBJS)),)
-OBJS += $(BT_COMMAND_EXTRA_OBJS)
-C_DEPS += $(BT_COMMAND_EXTRA_DEPS)
-ORDERED_OBJS += \
-$(BT_COMMAND_EXTRA_OBJS)
 endif

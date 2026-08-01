@@ -1,5 +1,53 @@
 # MSPM0G3507 自制板模板工程
 
+## 当前两任务调参固件
+
+- `Task 1 Speed`：平滑加速到 `S`，定速 3 秒，平滑减速到零，停稳后换向循环。
+- `Task 2 Trace`：8 路灰度加权循迹；大偏差快速滤波、小偏差慢滤波，带死区、PD 和弯道降速；不检测停车线，丢线保持上一拍目标。
+- 当前只配置 UART0（115200 baud），UART2/香橙派和 UART3 已移除。
+
+VOFA+ 下行命令以换行结束，逗号也可替换成 `=` 或 `:`：
+
+```text
+KP,11.5    速度环 Kp
+KI,0.3     速度环 Ki
+KD,0.1     速度环 Kd
+ki,1.0     灰度方向环 Kp（小写，大小写敏感）
+S,60       Task 1 定速值 / Task 2 巡航速度（cm/s）
+```
+
+VOFA+ 上行使用 JustFloat，共 11 个通道：左目标、左实际、右目标、右实际、速度 Kp、速度 Ki、速度 Kd、灰度 Kp、设定速度、灰度误差、方向修正。
+
+### 当前循迹控制链路
+
+```text
+74HC165 读取 8 路灰度（低有效）
+    → D1~D8 加权重心计算
+    → 大/小偏差自适应滤波 + 中心死区
+    → 灰度 PD 方向修正 + 弯道基准降速
+    → 左右轮目标速度（base ± correction）
+    → 编码器 20 ms 测速
+    → 左右独立增量式速度 PID
+    → PID 输出限幅
+    → 电机驱动层输出方向和 PWM
+```
+
+所以链路可以概括为“读取灰度 → 加权计算 → 输出目标差速 → 输入速度环 → 输出 PWM”。这里的“目标差速”是左右轮的目标速度，不是直接修改 PWM。业务层没有开环 PWM 接口；只有速度 PID 能调用电机输出，另保留一个零输出安全停机接口。
+
+### 默认参数与修改位置
+
+| 参数 | 当前默认值 | 固化修改位置 | UART0 在线修改 |
+|---|---:|---|---|
+| 基准速度 `S` | 60 cm/s | `App/app_config.h` 的 `APP_VEHICLE_DEFAULT_SPEED` | `S,60` |
+| 速度环 Kp / Ki / Kd | 11.5 / 0.3 / 0.1 | `App/app_vehicle.c` 的 `leftSpeedPid`、`rightSpeedPid` | `KP,11.5` / `KI,0.3` / `KD,0.1` |
+| 灰度 Kp | 1.0 | `App/app_config.h` 的 `APP_LINE_DEFAULT_KP` | `ki,1.0` |
+| 灰度 Kd | 0.10 | `App/app_config.h` 的 `APP_LINE_FIXED_KD` | 当前固定，需改代码 |
+| 8 路权重 | -70,-50,-30,-10,10,30,50,70 | `Module/LineTrace/line_trace.c` 的 `lineWeights` | 不支持 |
+| 快速滤波阈值 | 误差 35 / 变化量 25 | `APP_LINE_FAST_ERROR` / `APP_LINE_FAST_DELTA` | 不支持 |
+| 中心死区 | 12 | `APP_LINE_CENTER_DEADBAND` | 不支持 |
+| 弯道降速 / 最低速度比例 | 0.30 / 0.45 | `APP_LINE_CURVE_SLOWDOWN_GAIN` / `APP_LINE_MINIMUM_SPEED_RATIO` | 不支持 |
+| 速度 PID 输出限幅 | ±1800 | `APP_VEHICLE_PID_OUT_MAX/MIN` | 不支持 |
+
 ## 多人协作先看：`.vscode` 不上传
 
 本仓库已经在 `.gitignore` 中忽略整个 `.vscode/`：
@@ -66,7 +114,7 @@ cy_template/
 ├─ third_party/            第三方依赖，目前包含逐飞配置库
 ├─ tools/                  辅助脚本
 ├─ docs/                   引脚和设计说明
-└─ targetConfigs/          CCS/J-Link 目标配置
+└─ tools/vscode/           共享构建/下载脚本和 J-Link 目标配置
 ```
 
 调用方向应保持：
@@ -218,12 +266,7 @@ BAT_mV = raw * 33297 / 4095
 
 ## 车辆控制说明
 
-车辆逻辑在 `App/app_vehicle.c`：
-
-- UART2 蓝牙命令处理
-- 灰度循迹状态更新
-- 编码器测速
-- 速度 PID 输出
+当前车辆控制只使用 UART0 VOFA、8 路灰度、编码器、速度 PID 和电机驱动。UART2/香橙派控制链路已删除。任务状态机与灰度目标生成在 `App/app.c`，灰度算法在 `Module/LineTrace/line_trace.c`，速度闭环在 `App/app_vehicle.c`，PWM 寄存器只在 `Module/Motor/motor.c` 内访问。
 
 当前没有采用“所有任务塞进 1ms 总中断”的写法。工程使用 SysTick 提供毫秒时基，在 `App_Run()` 中做非阻塞时间片调度。中断只处理短操作，例如 SysTick 计数、UART 接收、编码器边沿。
 
@@ -261,6 +304,14 @@ Release/
 ## 烧录建议
 
 推荐使用 CCS 或 UniFlash/DSLite 配合 J-Link。DAPLink/OpenOCD 可作为备用方案，但需要使用支持 MSPM0 的 OpenOCD 目标脚本。
+
+本机命令行下载入口：
+
+```powershell
+cmd /d /c tools\vscode\flash-dslite-jlink.cmd "%CD%" "D:\APPs\TI\Unflsh\dslite.bat"
+```
+
+共享 J-Link 配置为 `tools/vscode/MSPM0G3507-jlink.ccxml`，不再依赖被 Git 忽略的本机 `targetConfigs/`。
 
 详细烧录和调试经验见 [`模板.md`](模板.md)。
 

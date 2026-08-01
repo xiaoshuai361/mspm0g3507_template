@@ -42,27 +42,6 @@ uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len);
  * @note 本地日志关闭时此入口仍可发送，确保UART0只输出桥接原始数据。
  * @retval 1表示成功入队，0表示参数无效或发送队列空间不足。
  */
-uint8_t uart0_bridge_write_nonblocking(const uint8_t *data, uint16_t len);
-
-/* ======== UART3 灰度传感器数据上传 ========
- * TX=PA14  RX=PA13  波特率 115200
- * 数据格式： GD_S:XX\r\n  (XX 为 16进制原始字节)
- */
-/**
- * @brief 通过 UART3 发送单个字符。
- * @param ch 待发送字符。
- * @note 发送前会等待 UART3 忙状态结束。
- * @retval 无。
- */
-void uart3_send_char(char ch);
-/**
- * @brief 通过 UART3 发送 C 字符串。
- * @param str 待发送字符串指针。
- * @note str 为 NULL 时直接返回。
- * @retval 无。
- */
-void uart3_send_string(const char *str);
-
 /* ======== VOFA+ JustFloat 协议 ========
  * 使用方式：在VOFA+中选择 JustFloat 协议
  * 每帧格式：[float0][float1]...[floatN-1][0x00 0x00 0x80 0x7F]
@@ -78,10 +57,11 @@ uint8_t vofa_justfloat_send(const float *data, uint8_t len);
 
 /* ======== VOFA+ 命令接收接口 ========
  * 通过串口终端发送 ASCII 命令调整PID参数：
- *   KP=1.5   设置两路速度环 Kp
- *   KI=0.3   设置两路速度环 Ki
- *   KD=0.1   设置两路速度环 Kd
- *   S=50     设置标准速度
+ *   KP,11.5  设置两路速度环 Kp
+ *   KI,0.3   设置两路速度环 Ki
+ *   KD,0.1   设置两路速度环 Kd
+ *   ki,1.0   设置灰度方向环 Kp（大小写敏感）
+ *   S,60     设置 Task 1 定速值和 Task 2 巡航速度
  */
 /**
  * @brief 获取 VOFA+ 命令接收完成标志。

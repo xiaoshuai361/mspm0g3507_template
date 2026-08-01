@@ -124,11 +124,7 @@ Menu_Input App_InputToMenu(Key5D_Key key)
  */
 void App_LogKeyPress(Key5D_Key key)
 {
-    char message[40];
-
-    (void)snprintf(message, sizeof(message), "KEY=%s ADC=%u\r\n",
-                   Key5D_GetName(key), lastAdcValue);
-    uart0_send_string(message);
+    (void)key;
     DL_GPIO_togglePins(LED_PORT, LED_PIN_22_PIN);
 }
 

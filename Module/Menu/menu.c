@@ -5,7 +5,7 @@
 #include "oled.h"
 
 #define MENU_MAIN_ITEM_COUNT (2U) /**< 一级菜单仅保留任务设置和小车状态。 */
-#define MENU_TASK_ITEM_COUNT (6U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
+#define MENU_TASK_ITEM_COUNT (2U)
 #define MENU_LINE_LENGTH     (16U) /**< MENU_LINE_LENGTH 应用层配置宏。 */
 
 static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
@@ -13,12 +13,11 @@ static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
 };
 
 static const char *const taskItems[MENU_TASK_ITEM_COUNT] = {
-    "Task 2F", "Task 2L", "Task 3", "Task 4", "Task 5", "Task 6"
+    "Task 1 Speed", "Task 2 Trace"
 };
 
-/* Task 2L uses code 6 so the existing internal task IDs stay unchanged. */
 static const uint8_t taskCodes[MENU_TASK_ITEM_COUNT] = {
-    1U, 6U, 2U, 3U, 4U, 5U
+    1U, 2U
 };
 
 static uint8_t Menu_MoveSelection(uint8_t selection, uint8_t count,
@@ -314,8 +313,9 @@ static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
         Menu_DrawLine(index, line);
     }
 
-    Menu_DrawLine(2U, data->opiBootReady ? "  READY" : "  WAIT OPI");
-    Menu_RenderBatteryLine(data);
+    (void)data;
+    Menu_DrawLine(2U, "  UART0 VOFA");
+    Menu_DrawLine(3U, "  KP KI KD ki S");
 }
 
 /**
@@ -331,6 +331,8 @@ static void Menu_RenderTasks(const Menu_State *state,
     uint8_t start;  /* 滚动窗口起始索引 */
     char line[MENU_LINE_LENGTH + 1U];
 
+    (void)data;
+
     /* 计算滚动窗口：保证当前选中项在可见区域内 */
     if (MENU_TASK_ITEM_COUNT <= MENU_VISIBLE_LINE_COUNT) {
         start = 0U;
@@ -344,12 +346,10 @@ static void Menu_RenderTasks(const Menu_State *state,
     for (i = 0U; i < MENU_VISIBLE_LINE_COUNT && (start + i) < MENU_TASK_ITEM_COUNT; i++) {
         uint8_t idx = (uint8_t)(start + i);
         const bool active = (taskCodes[idx] == state->activeTask);
-        const char readyMark = (active && data->taskControlReady &&
-                                data->taskReadyBlinkVisible) ? '*' : ' ';
 
         (void) snprintf(line, sizeof(line), "%c%c %s",
                         (idx == state->taskSelection) ? '>' : ' ',
-                        readyMark,
+                        active ? '*' : ' ',
                         taskItems[idx]);
         Menu_DrawLine(i, line);
     }
