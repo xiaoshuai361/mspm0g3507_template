@@ -299,7 +299,7 @@ static void Menu_RenderBatteryLine(const Menu_ViewData *data)
  * @brief 渲染一级菜单。
  * @param state 状态枚举值。
  * @param data 数据缓冲区。
- * @note 前两行显示菜单项，第三行显示香橙派就绪状态，第四行显示电池。
+ * @note 前两行显示菜单项，第三行显示本地就绪状态，第四行显示电池。
  * @retval 无。
  */
 static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
@@ -314,7 +314,7 @@ static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
         Menu_DrawLine(index, line);
     }
 
-    Menu_DrawLine(2U, data->opiBootReady ? "  READY" : "  WAIT OPI");
+    Menu_DrawLine(2U, "  LOCAL READY");
     Menu_RenderBatteryLine(data);
 }
 

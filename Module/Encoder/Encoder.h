@@ -8,7 +8,7 @@
 #define ENCODE_13X 13 		//编码器线数
 #define JIANSUBI 28    	//减速比
 #define BEIPIN 8            //倍频
-#define SAMPLE_TIME 0.01	//采样时间
+#define SAMPLE_TIME 0.02f	// 与 App 速度环一致的 20 ms 采样时间
 #define CC (ENCODE_13X*JIANSUBI*BEIPIN*SAMPLE_TIME) /**< 编码器速度换算系数。 */
 
 #define PI  3.1415f /**< 圆周率近似值。 */

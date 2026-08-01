@@ -286,12 +286,21 @@ int32_t Encoder_CumulativeR;  /**< 右轮上电后累计（不清零）。 */
 
 void MEASURE_MOTORS_SPEED(void)
 {
-    /* 累积编码器值（清空前保存） */
-    Encoder_CumulativeL += Motor1_Encoder_Value;
-    Encoder_CumulativeR += Motor2_Encoder_Value;
+    int32_t encoderLeft;
+    int32_t encoderRight;
 
-    Motor1_Get_Speed();
-    Motor2_Get_Speed();
+    /* 与三个远端速度版本一致：原子读取并清零本周期编码器计数。 */
+    NVIC_DisableIRQ(Encoder_INT_IRQN);
+    encoderLeft = Motor1_Encoder_Value;
+    encoderRight = Motor2_Encoder_Value;
+    Motor1_Encoder_Value = 0;
+    Motor2_Encoder_Value = 0;
+    NVIC_EnableIRQ(Encoder_INT_IRQN);
+
+    Encoder_CumulativeL += encoderLeft;
+    Encoder_CumulativeR += encoderRight;
+    Motor1_Speed = (float)encoderLeft / CC * PI * RR;
+    Motor2_Speed = (float)encoderRight / CC * PI * RR;
 
     Motor1_Lucheng += Motor1_Speed * SAMPLE_TIME;
     Motor2_Lucheng += Motor2_Speed * SAMPLE_TIME;

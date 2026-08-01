@@ -96,7 +96,7 @@ void App_ImuRun(void);
 void App_ToFRun(void);
 
 /**
- * @brief 运行车辆相关任务，包括蓝牙、循迹、测速和速度闭环。
+ * @brief 运行车辆测速和速度闭环任务。
  * @param 无。
  * @note 非阻塞函数应由 App_Run 或对应周期任务重复调用。
  * @retval 无。
@@ -106,18 +106,10 @@ void App_VehicleRun(void);
 /**
  * @brief 运行蓝牙命令处理任务。
  * @param 无。
- * @note 命令 1~7 控制小车手动运动和循迹开关。
+ * @note 命令 1~5 控制小车手动运动；旧巡线开关逻辑已移除。
  * @retval 无。
  */
 void App_BluetoothRun(void);
-
-/**
- * @brief 读取灰度循迹数据，并在循迹模式下更新目标速度。
- * @param 无。
- * @note 非阻塞函数应由 App_Run 或对应周期任务重复调用。
- * @retval 无。
- */
-void App_LineTraceRun(void);
 
 /**
  * @brief 运行车辆速度闭环控制任务。

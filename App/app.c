@@ -13,7 +13,6 @@
 #include "line_trace.h"
 #include "line_trace_test.h"
 #include "menu_test.h"
-#include "motor.h"
 #include "Encoder.h"
 #include "Encoder_XZ.h"
 #include "oled.h"
@@ -57,110 +56,33 @@ static void App_LogSelfTests(void)
 enum {
     APP_LINE_LAP_IDLE,
     APP_LINE_LAP_TRACKING,
-    APP_LINE_LAP_BRAKING,
+    APP_LINE_LAP_STOPPING,
     APP_LINE_LAP_STOPPED
 };
 
-enum {
-    APP_LINE_CONTROL_PERIOD_MS = 20U,
-    APP_LINE_CROSS_LOCKOUT_FRAMES = 80U
-};
+typedef enum {
+    APP_LINE_STOP_IMMEDIATE,
+    APP_LINE_STOP_ACTIVE_BRAKE,
+    APP_LINE_STOP_SLOW_RAMP
+} App_LineStopMode;
 
 typedef struct {
     uint8_t state;
     uint8_t startKeyArmed;
     uint8_t stopOnDist;        /* 1=编码器距离停车(OLED Task 4) */
-    uint8_t brakePending;      /* 1=已检测停车线，等待到达设定制动位置 */
     uint32_t lastTick;
     uint32_t startTick;
-    uint32_t brakeStartTick;
+    uint32_t stopStartTick;
+    uint16_t lastReportedSec;
     uint16_t crossLockout;
     uint8_t crossConfirm;
     int32_t startEncL;         /* 启动时左编码器累计值 */
     int32_t startEncR;         /* 启动时右编码器累计值 */
-    int32_t brakeDetectEncL;   /* 检测到停车线时的左编码器累计值 */
-    int32_t brakeDetectEncR;   /* 检测到停车线时的右编码器累计值 */
-    float lastLeftTarget;
-    float lastRightTarget;
-    float brakeStartLeftTarget;
-    float brakeStartRightTarget;
-    LineTrace_OuterFilter outerFilter;
+    float stopTargetSpeed;
     LineTrace_Controller controller;
 } App_LineLapContext;
 
 #define TASK4_STOP_DIST_AB 12600  /* OLED Task 4：A→B 1.5m直线脉冲阈值 */
-
-/*
- * OLED Task 2F/2L使用单一线性纠偏增益，避免偏差跨阈值时差速突变。
- * 半圆转向不足先增 steeringKp，最后才增 steeringMax。
- * 所有“帧”均为20ms，误差单位为0.1个灰度探头间距。
- */
-static const LineTrace_ControlConfig task1FastControlConfig = {
-    .cruisePwm = APP_TASK1_LINE_CRUISE_PWM, /* 直线巡航PWM，在app_config.h中修改。 */
-    .lostPwm = 700,              /* 弯道重度降速/丢线搜索下限；增大可补偿配重，但更难找回线。 */
-    .rampUpStep = 40,            /* 每帧基准PWM上升量；增大则起步和出弯加速更快。 */
-    .rampDownStep = 50,          /* 限制每帧降速，避免短时抖动造成骤降。 */
-    .curveSlowdownGain = 12,     /* 每单位绝对偏差扣除的PWM；增大可降低弯速。 */
-    .slowdownEntryError = 10,    /* 小偏差只纠偏，不降低巡航基准。 */
-    .steeringKp = 18,            /* 全偏差范围线性增益；避免外侧差速跨阈值突变。 */
-    .steeringMax = 560,          /* 放宽高速档差速修正硬上限。 */
-    .steeringSlewStep = 75,      /* 每20ms差速最多变化75，避免偏差突变时瞬间反打。 */
-    .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
-    .rightTurnBoost = 155,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
-    .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
-    .fastErrorThreshold = 15,    /* 原始偏差达到此值使用3/4新值快滤波；减小响应更快。 */
-    .fastDeltaThreshold = 12,     /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
-    .lostSearchStartError = 18,  /* 丢线搜索的初始等效偏差；增大则首次找线转向更强。 */
-    .lostSearchStepFrames = 2U,  /* 搜索偏差每隔多少帧加1；减小会更快增强搜索。 */
-    .lostHoldFrames = 5U,        /* 丢线后保持最后纠偏的帧数；当前1帧即20ms。 */
-    .slowdownConfirmFrames = 3U, /* 偏差持续60ms才开始降速，滤除瞬时抖动。 */
-    .lostStopFrames = 1500U,     /* 连续丢线停车时间；当前1500帧即30s。 */
-};
-
-static const LineTrace_ControlConfig task2StableControlConfig = {
-    .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
-    .lostPwm = 584,
-    .rampUpStep = 19,
-    .rampDownStep = 11,
-    .curveSlowdownGain = 1,
-    .slowdownEntryError = 8,
-    .steeringKp = 14,
-    .steeringMax = 360,
-    .steeringSlewStep = 45,
-    .leftPwmBias = 39,
-    .rightTurnBoost = 70,
-    .centerDeadband = 5,
-    .fastErrorThreshold = 15,
-    .fastDeltaThreshold = 12,
-    .lostSearchStartError = 16,
-    .lostSearchStepFrames = 3U,
-    .lostHoldFrames = 2U,
-    .slowdownConfirmFrames = 2U,
-    .lostStopFrames = 150U,
-};
-
-/* Task 5/6 钢球稳定任务：纠偏参数向快速版靠拢，保留缓慢起步防止球滚落。 */
-static const LineTrace_ControlConfig task56ControlConfig = {
-    .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
-    .lostPwm = 650,
-    .rampUpStep = 20,            /* 恢复缓慢起步，钢球任务避免急加速球滚落。 */
-    .rampDownStep = 15,
-    .curveSlowdownGain = 3,
-    .slowdownEntryError = 9,
-    .steeringKp = 14,            /* 逼近快速版16，提升小偏差响应。 */
-    .steeringMax = 450,          /* 逼近快速版480，弯道差速不再受限。 */
-    .steeringSlewStep = 30,      /* 逼近快速版60，差速变化更快。 */
-    .leftPwmBias = 45,
-    .rightTurnBoost = 100,       /* 逼近快速版115，右弯外轮扭矩补偿。 */
-    .centerDeadband = 5,
-    .fastErrorThreshold = 15,
-    .fastDeltaThreshold = 10,    /* 逼近快速版8，突变响应更快。 */
-    .lostSearchStartError = 17,
-    .lostSearchStepFrames = 2U,  /* 同快速版，丢线搜索加速。 */
-    .lostHoldFrames = 3U,
-    .slowdownConfirmFrames = 2U,
-    .lostStopFrames = 150U,
-};
 
 static App_LineLapContext task1LineContext = { .startKeyArmed = 1U };
 static App_LineLapContext task3LineContext = {
@@ -191,7 +113,25 @@ static bool App_LineControlIsTimingCritical(void)
     }
 
     return (context->state == APP_LINE_LAP_TRACKING) ||
-           (context->state == APP_LINE_LAP_BRAKING);
+           (context->state == APP_LINE_LAP_STOPPING);
+}
+
+static float App_MoveToward(float current, float target, float step)
+{
+    if (current < target) {
+        current += step;
+        return (current > target) ? target : current;
+    }
+    if (current > target) {
+        current -= step;
+        return (current < target) ? target : current;
+    }
+    return current;
+}
+
+static float App_AbsFloat(float value)
+{
+    return (value >= 0.0f) ? value : -value;
 }
 
 static void App_LineLapReset(App_LineLapContext *context)
@@ -200,77 +140,12 @@ static void App_LineLapReset(App_LineLapContext *context)
     context->startKeyArmed = 1U;
     context->lastTick = 0U;
     context->startTick = 0U;
-    context->brakeStartTick = 0U;
-    context->brakePending = 0U;
-    context->brakeDetectEncL = 0;
-    context->brakeDetectEncR = 0;
-    context->lastLeftTarget = 0.0f;
-    context->lastRightTarget = 0.0f;
-    context->brakeStartLeftTarget = 0.0f;
-    context->brakeStartRightTarget = 0.0f;
-    LineTrace_OuterFilterReset(&context->outerFilter);
+    context->stopStartTick = 0U;
+    context->lastReportedSec = 0U;
+    context->stopTargetSpeed = 0.0f;
     LineTrace_ControllerReset(&context->controller);
     LineTrace_ResetCrossDetect(&context->crossLockout,
                                &context->crossConfirm);
-}
-
-static float App_LinePwmToSpeedTarget(int16_t equivalentPwm,
-                                      float referenceSpeed)
-{
-    return ((float)equivalentPwm * referenceSpeed) /
-           (float)APP_STABLE_LINE_CRUISE_PWM;
-}
-
-static void App_LineApplyClosedLoopTarget(
-    App_LineLapContext *context,
-    const LineTrace_ControlOutput *controlOutput, float referenceSpeed)
-{
-    const int16_t leftEquivalentPwm = (int16_t)(
-        controlOutput->basePwm + controlOutput->correction);
-    const int16_t rightEquivalentPwm = (int16_t)(
-        controlOutput->basePwm - controlOutput->correction);
-
-    /* 固定 PWM 偏置由速度环自动补偿，只保留巡线产生的目标差速。 */
-    context->lastLeftTarget = App_LinePwmToSpeedTarget(
-        leftEquivalentPwm, referenceSpeed);
-    context->lastRightTarget = App_LinePwmToSpeedTarget(
-        rightEquivalentPwm, referenceSpeed);
-    App_VehicleClosedLoopSetTarget(context->lastLeftTarget,
-                                   context->lastRightTarget);
-}
-
-static void App_LineApplyBrake(int16_t brakePwm)
-{
-    App_VehicleClosedLoopDisable();
-    Set_Speed((int)-brakePwm, (int)-brakePwm);
-}
-
-static void App_LineBeginStopping(App_LineLapContext *context,
-                                  uint32_t now, int16_t brakePwm)
-{
-    context->state = APP_LINE_LAP_BRAKING;
-    context->brakeStartTick = now;
-    context->brakeStartLeftTarget = context->lastLeftTarget;
-    context->brakeStartRightTarget = context->lastRightTarget;
-
-    if (brakePwm > 0) {
-        App_LineApplyBrake(brakePwm);
-    } else {
-        App_VehicleClosedLoopSetTarget(context->brakeStartLeftTarget,
-                                       context->brakeStartRightTarget);
-    }
-}
-
-static void App_LineApplySlowStop(const App_LineLapContext *context,
-                                  uint32_t elapsedMs,
-                                  uint16_t durationMs)
-{
-    const float remainingRatio =
-        (float)((uint32_t)durationMs - elapsedMs) / (float)durationMs;
-
-    App_VehicleClosedLoopSetTarget(
-        context->brakeStartLeftTarget * remainingRatio,
-        context->brakeStartRightTarget * remainingRatio);
 }
 
 static void App_OPiLogStatus(uint8_t code, uint8_t expected)
@@ -288,9 +163,8 @@ static void App_OPiDrainRuntimeStatus(void)
     uint8_t code;
 
     while (OPi_ReadFrame(&code) != 0U) {
-        if (code == OPI_STATUS_BOOT_READY) {
-            App_MenuSetOpiBootReady(true);
-        } else {
+        /* AA01 已不参与启动门控，仅消费以免污染后续任务状态。 */
+        if (code != OPI_STATUS_BOOT_READY) {
             App_OPiLogStatus(code, 0U);
         }
     }
@@ -301,15 +175,13 @@ static void App_OPiPollControlReady(uint8_t *controlReady)
     uint8_t code;
 
     while (OPi_ReadFrame(&code) != 0U) {
-        if (code == OPI_STATUS_BOOT_READY) {
-            App_MenuSetOpiBootReady(true);
-        } else if (code == OPI_STATUS_CONTROL_READY) {
+        if (code == OPI_STATUS_CONTROL_READY) {
             if (*controlReady == 0U) {
                 *controlReady = 1U;
                 App_MenuSetTaskControlReady(true);
                 uart0_send_string("OPI: CONTROL READY\r\n");
             }
-        } else {
+        } else if (code != OPI_STATUS_BOOT_READY) {
             App_OPiLogStatus(code, OPI_STATUS_CONTROL_READY);
         }
     }
@@ -337,18 +209,13 @@ static void App_OPiForwardRxToUart0(void)
     }
 }
 
-/*
- * 香橙派启动完成后发送 AA01。M0只接收并消费此帧，不发送握手回包；
- * 其它残留状态记录后丢弃，避免带入下一项任务。
- */
+/* AA01 不再作为开机条件，仅消费；其它残留状态记录后丢弃。 */
 static void App_OPiDrainIdleStatus(void)
 {
     uint8_t code;
 
     while (OPi_ReadFrame(&code) != 0U) {
-        if (code == OPI_STATUS_BOOT_READY) {
-            App_MenuSetOpiBootReady(true);
-        } else {
+        if (code != OPI_STATUS_BOOT_READY) {
             App_OPiLogStatus(code, 0U);
         }
     }
@@ -356,7 +223,7 @@ static void App_OPiDrainIdleStatus(void)
 
 static void App_OPiStartTask(uint8_t taskCode)
 {
-    /* Consume the one-shot boot status and discard stale task statuses. */
+    /* 丢弃 AA01 和陈旧任务状态后发送新任务。 */
     App_OPiDrainIdleStatus();
     OPi_FlushRx();
     App_MenuSetTaskControlReady(false);
@@ -392,16 +259,14 @@ static void App_LineLapStart(App_LineLapContext *context,
     context->state = APP_LINE_LAP_TRACKING;
     context->lastTick = now;
     context->startTick = now;
+    context->lastReportedSec = 0U;
     LineTrace_ControllerReset(&context->controller);
     LineTrace_ResetCrossDetect(&context->crossLockout,
                                &context->crossConfirm);
-    context->crossLockout = APP_LINE_CROSS_LOCKOUT_FRAMES;
+    context->crossLockout = APP_TASK2_CROSS_LOCKOUT_FRAMES;
     context->startEncL = Encoder_CumulativeL;
     context->startEncR = Encoder_CumulativeR;
-    context->brakePending = 0U;
-    context->brakeDetectEncL = 0;
-    context->brakeDetectEncR = 0;
-    LineTrace_OuterFilterReset(&context->outerFilter);
+    context->stopTargetSpeed = 0.0f;
     App_VehicleClosedLoopStop();
     App_MenuForceTimerPage();
     Menu_SetTaskTime(0U);
@@ -411,83 +276,57 @@ static void App_LineLapStart(App_LineLapContext *context,
 }
 
 static void App_LineLapRun(App_LineLapContext *context,
-                           const LineTrace_ControlConfig *config,
-                           uint8_t taskNumber, float referenceSpeed,
-                           int16_t brakePwm,
-                           uint16_t brakeDurationMs,
-                           uint32_t brakeDelayPulses)
+                           uint8_t taskNumber, float cruiseSpeed,
+                           App_LineStopMode stopMode,
+                           uint16_t stopDurationMs,
+                           float stopRampStep)
 {
     const uint32_t now = BSP_Delay_GetTick();
     const Key5D_Key stableKey = App_InputGetStableKey();
+    LineTrace_ControlConfig config = {
+        .centerDeadband = APP_LINE_CENTER_DEADBAND,
+        .steeringKp = App_VehicleGetLineKp(),
+        .steeringKd = APP_LINE_FIXED_KD,
+        .curveSlowdownGain = APP_LINE_CURVE_SLOWDOWN_GAIN,
+        .minimumSpeedRatio = APP_LINE_MINIMUM_SPEED_RATIO,
+        .correctionMax = APP_LINE_CORRECTION_MAX,
+        .correctionSlewStep = APP_LINE_CORRECTION_SLEW_STEP,
+    };
+    float controlSpeed = cruiseSpeed;
+    float measuredSpeed;
     uint8_t raw;
-    uint8_t steeringRaw;
     uint8_t activeCount;
     uint8_t hasLine;
-    int16_t errorTenths;
+    int16_t errorTenths = 0;
     LineTrace_ControlOutput controlOutput;
 
     if (stableKey != KEY5D_KEY_RIGHT) {
         context->startKeyArmed = 1U;
     }
-    if (context->state == APP_LINE_LAP_BRAKING) {
-        const uint32_t elapsedMs = (uint32_t)(
-            now - context->brakeStartTick);
+    if ((context->state == APP_LINE_LAP_STOPPING) &&
+        (stopMode == APP_LINE_STOP_ACTIVE_BRAKE)) {
+        const uint32_t elapsedMs = now - context->stopStartTick;
 
-        if (elapsedMs < brakeDurationMs) {
-            if (brakePwm > 0) {
-                App_LineApplyBrake(brakePwm);
-            } else {
-                /* 慢停+巡线：读取灰度偏差，在减速基础上保持纠偏。 */
-                int16_t corr;
-                float baseSpeed;
-                float remainingRatio;
-
-                if ((uint32_t)(now - context->lastTick) <
-                    APP_LINE_CONTROL_PERIOD_MS) {
-                    return;
-                }
-                context->lastTick = now;
-
-                Grayscale_Read();
-                raw = Grayscale_GetRaw();
-                steeringRaw = LineTrace_FilterActiveLowOuterChannels(
-                    &context->outerFilter, raw,
-                    APP_LINE_OUTER_FILTER_FRAMES);
-                hasLine = LineTrace_CalcActiveLowWeightedError(
-                    steeringRaw, &errorTenths, 0);
-
-                remainingRatio = (float)((uint32_t)brakeDurationMs -
-                    elapsedMs) / (float)brakeDurationMs;
-                baseSpeed = (context->brakeStartLeftTarget +
-                    context->brakeStartRightTarget) * 0.5f *
-                    remainingRatio;
-
-                corr = (int16_t)((int32_t)errorTenths *
-                    (int32_t)(APP_VEHICLE_LINE_DIFF_GAIN * 10.0f) / 10);
-                if (corr > (int16_t)APP_VEHICLE_LINE_DIFF_MAX) {
-                    corr = (int16_t)APP_VEHICLE_LINE_DIFF_MAX;
-                } else if (corr < -(int16_t)APP_VEHICLE_LINE_DIFF_MAX) {
-                    corr = -(int16_t)APP_VEHICLE_LINE_DIFF_MAX;
-                }
-
-                App_VehicleClosedLoopSetTarget(
-                    baseSpeed + (float)corr,
-                    baseSpeed - (float)corr);
-            }
-        } else {
+        measuredSpeed = (Motor1_Speed + Motor2_Speed) * 0.5f;
+        if ((elapsedMs >= stopDurationMs) ||
+            (measuredSpeed <= APP_TASK2_ACTIVE_BRAKE_STOP_SPEED)) {
             App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
+            return;
         }
-        return;
+        controlSpeed = measuredSpeed;
     }
+
     if ((context->state != APP_LINE_LAP_TRACKING) &&
+        (context->state != APP_LINE_LAP_STOPPING) &&
         (context->startKeyArmed != 0U) &&
         (stableKey == KEY5D_KEY_RIGHT)) {
         App_LineLapStart(context, taskNumber);
         return;
     }
 
-    if (context->state != APP_LINE_LAP_TRACKING) {
+    if ((context->state != APP_LINE_LAP_TRACKING) &&
+        (context->state != APP_LINE_LAP_STOPPING)) {
         App_VehicleClosedLoopStop();
         return;
     }
@@ -497,37 +336,23 @@ static void App_LineLapRun(App_LineLapContext *context,
     }
     context->lastTick = now;
 
-    if (context->brakePending != 0U) {
-        int32_t dL = Encoder_CumulativeL - context->brakeDetectEncL;
-        int32_t dR = Encoder_CumulativeR - context->brakeDetectEncR;
-        uint32_t distance = (uint32_t)((dL >= 0 ? dL : -dL) +
-                                       (dR >= 0 ? dR : -dR));
-
-        if (distance >= brakeDelayPulses) {
-            context->brakePending = 0U;
-            App_LineBeginStopping(context, now, brakePwm);
-            return;
-        }
-    }
-
-    /* 每秒更新计时显示 */
-    {   static uint16_t lastReportedSec;
+    /* 仅行驶阶段更新计时；进入停车状态的当拍即冻结成绩。 */
+    if (context->state == APP_LINE_LAP_TRACKING) {
         uint16_t sec = (uint16_t)((now - context->startTick) / 1000U);
-        if (sec != lastReportedSec) {
-            lastReportedSec = sec;
+        if (sec != context->lastReportedSec) {
+            context->lastReportedSec = sec;
             Menu_SetTaskTime(sec);
         }
     }
 
     Grayscale_Read();
     raw = Grayscale_GetRaw();
-    steeringRaw = LineTrace_FilterActiveLowOuterChannels(
-        &context->outerFilter, raw, APP_LINE_OUTER_FILTER_FRAMES);
     hasLine = LineTrace_CalcActiveLowWeightedError(
-        steeringRaw, &errorTenths, 0);
-    activeCount = LineTrace_CountActiveLow(raw);
+        raw, &errorTenths, &activeCount);
 
-    if ((context->brakePending == 0U) &&
+    /* stopOnDist 任务（OLED Task 4）只由编码器阈值触发停车。 */
+    if ((context->state == APP_LINE_LAP_TRACKING) &&
+        (context->stopOnDist == 0U) &&
         (LineTrace_DetectCrossLine(raw, activeCount,
                                   &context->crossLockout,
                                   &context->crossConfirm)
@@ -546,13 +371,17 @@ static void App_LineLapRun(App_LineLapContext *context,
             }
         }
 
-        if (brakeDurationMs > 0U) {
-            if (brakeDelayPulses > 0U) {
-                context->brakePending = 1U;
-                context->brakeDetectEncL = Encoder_CumulativeL;
-                context->brakeDetectEncR = Encoder_CumulativeR;
-            } else {
-                App_LineBeginStopping(context, now, brakePwm);
+        if (stopMode == APP_LINE_STOP_ACTIVE_BRAKE) {
+            context->state = APP_LINE_LAP_STOPPING;
+            context->stopStartTick = now;
+            App_VehicleClosedLoopSetActiveBrake(true);
+        } else if (stopMode == APP_LINE_STOP_SLOW_RAMP) {
+            context->state = APP_LINE_LAP_STOPPING;
+            context->stopStartTick = now;
+            context->stopTargetSpeed =
+                App_VehicleClosedLoopGetAverageTarget();
+            if (context->stopTargetSpeed <= 0.0f) {
+                context->stopTargetSpeed = cruiseSpeed;
             }
         } else {
             App_VehicleClosedLoopStop();
@@ -564,40 +393,70 @@ static void App_LineLapRun(App_LineLapContext *context,
                        (unsigned long)(elapsed / 1000U),
                        (unsigned long)((elapsed % 1000U) / 100U));
         uart0_send_string(message);
-        if (context->brakePending == 0U) {
+        if (stopMode != APP_LINE_STOP_SLOW_RAMP) {
             return;
         }
     }
     skip_cross: (void)0;
 
-    /* 编码器距离停车(OLED Task 4)：|ΔL|+|ΔR| >= 阈值 → 停车 */
-    if (context->stopOnDist != 0U) {
+    /* OLED Task 4 距离到达后进入与 Task 5/6 相同的缓停状态。 */
+    if ((context->state == APP_LINE_LAP_TRACKING) &&
+        (context->stopOnDist != 0U)) {
         int32_t dL = Encoder_CumulativeL - context->startEncL;
         int32_t dR = Encoder_CumulativeR - context->startEncR;
         uint32_t dist = (uint32_t)((dL >= 0 ? dL : -dL) + (dR >= 0 ? dR : -dR));
         if (dist >= TASK4_STOP_DIST_AB) {
+            if (stopMode == APP_LINE_STOP_SLOW_RAMP) {
+                context->state = APP_LINE_LAP_STOPPING;
+                context->stopStartTick = now;
+                context->stopTargetSpeed =
+                    App_VehicleClosedLoopGetAverageTarget();
+                if (context->stopTargetSpeed <= 0.0f) {
+                    context->stopTargetSpeed = cruiseSpeed;
+                }
+            } else {
+                App_VehicleClosedLoopStop();
+                context->state = APP_LINE_LAP_STOPPED;
+            }
+            uart0_send_string("T4: DIST STOP\r\n");
+            if (stopMode != APP_LINE_STOP_SLOW_RAMP) {
+                return;
+            }
+        }
+    }
+
+    if ((context->state == APP_LINE_LAP_STOPPING) &&
+        (stopMode == APP_LINE_STOP_SLOW_RAMP)) {
+        context->stopTargetSpeed = App_MoveToward(
+            context->stopTargetSpeed, 0.0f,
+            stopRampStep);
+        controlSpeed = context->stopTargetSpeed;
+        measuredSpeed = (App_AbsFloat(Motor1_Speed) +
+                         App_AbsFloat(Motor2_Speed)) * 0.5f;
+
+        if (((controlSpeed == 0.0f) &&
+             (measuredSpeed <= APP_TASK456_STOP_SPEED)) ||
+            ((uint32_t)(now - context->stopStartTick) >=
+             stopDurationMs)) {
             App_VehicleClosedLoopStop();
             context->state = APP_LINE_LAP_STOPPED;
-            uart0_send_string("T4: DIST STOP\r\n");
             return;
         }
     }
 
-    LineTrace_ControllerStep(&context->controller, config,
-                             hasLine, errorTenths, &controlOutput);
-    if (controlOutput.shouldStop != 0U) {
-        char message[20];
+    LineTrace_ControllerStep(&context->controller, &config, hasLine,
+                             errorTenths, controlSpeed, &controlOutput);
+    App_VehicleSetLineTelemetry(raw,
+        (controlOutput.valid != 0U) ? controlOutput.filteredError :
+                                     errorTenths,
+        (controlOutput.valid != 0U) ? controlOutput.correction : 0.0f);
 
-        App_VehicleClosedLoopStop();
-        context->state = APP_LINE_LAP_STOPPED;
-        (void)snprintf(message, sizeof(message), "T%u: LOST\r\n",
-                       (unsigned int)taskNumber);
-        uart0_send_string(message);
-        return;
+    if (controlOutput.valid != 0U) {
+        App_VehicleClosedLoopSetTarget(controlOutput.leftTarget,
+                                       controlOutput.rightTarget);
+    } else if (context->state == APP_LINE_LAP_STOPPING) {
+        App_VehicleClosedLoopSetTarget(controlSpeed, controlSpeed);
     }
-
-    App_LineApplyClosedLoopTarget(context, &controlOutput,
-                                  referenceSpeed);
 }
 
 static void App_Task5FormatTenths(char *buffer, uint32_t size,
@@ -667,21 +526,22 @@ static void App_Task5ReturnToTaskList(void)
     App_MenuReturnToTaskList();
 }
 
-/* OLED Task 2F/2L: AA02发布后必须收到AA11；随后释放并再次按RIGHT发车。 */
+/* OLED Task 2F/2L：第一次RIGHT确认任务，释放后第二次RIGHT直接发车。 */
 void App_Task1Run(void)
 {
     static uint32_t activationGeneration;
-    static uint8_t controlReady;
     const float referenceSpeed = (g_active_task == 6U)
-                                     ? APP_TASK1_LOW_SPEED
-                                     : APP_VEHICLE_DEFAULT_SPEED;
+                                     ? APP_TASK2L_LINE_SPEED
+                                     : APP_TASK2F_LINE_SPEED;
+    const uint16_t brakeDurationMs = (g_active_task == 6U)
+                                         ? APP_TASK2L_ACTIVE_BRAKE_DURATION_MS
+                                         : APP_TASK2F_ACTIVE_BRAKE_DURATION_MS;
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
-        controlReady = 0U;
         task1LineContext.startKeyArmed = 0U;
         App_OPiStartTask(OPI_CMD_TASK2);
-        uart0_send_string("OPI T2: START, WAIT AA11\r\n");
+        uart0_send_string("OPI T2: START, NO WAIT\r\n");
     }
 
     if (App_InputGetStableKey() == KEY5D_KEY_LEFT) {
@@ -690,20 +550,10 @@ void App_Task1Run(void)
         return;
     }
 
-    if (controlReady == 0U) {
-        App_OPiPollControlReady(&controlReady);
-    } else {
-        App_OPiDrainRuntimeStatus();
-    }
-    if (controlReady == 0U) {
-        App_VehicleClosedLoopStop();
-        return;
-    }
-
-    App_LineLapRun(&task1LineContext, &task1FastControlConfig, 2U,
-                   referenceSpeed, 0,
-                   APP_TASK2_SLOW_STOP_DURATION_MS,
-                   APP_TASK1_BRAKE_DELAY_PULSES);
+    /* 第一次RIGHT在菜单中确认任务；释放后第二次RIGHT直接发车，不等待AA11。 */
+    App_OPiDrainRuntimeStatus();
+    App_LineLapRun(&task1LineContext, 2U, referenceSpeed,
+                   APP_LINE_STOP_ACTIVE_BRAKE, brakeDurationMs, 0.0f);
 }
 
 /* OLED Task 3: AA 03 -> AA 11 -> AA 07 -> AA 12. */
@@ -743,7 +593,7 @@ void App_Task2Run(void)
 
     while (OPi_ReadFrame(&code) != 0U) {
         if (code == OPI_STATUS_BOOT_READY) {
-            App_MenuSetOpiBootReady(true);
+            /* AA01 仅消费，不参与任务状态。 */
         } else if ((state == TASK3_WAIT_READY) &&
             (code == OPI_STATUS_CONTROL_READY)) {
             state = TASK3_WAIT_RIGHT_RELEASE;
@@ -815,8 +665,10 @@ void App_Task3Run(void)
         App_VehicleClosedLoopStop();
         return;
     }
-    App_LineLapRun(&task3LineContext, &task2StableControlConfig,
-                   4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
+    App_LineLapRun(&task3LineContext, 4U, APP_TASK4_LINE_SPEED,
+                   APP_LINE_STOP_SLOW_RAMP,
+                   APP_TASK4_STOP_TIMEOUT_MS,
+                   APP_TASK4_STOP_RAMP_STEP);
 }
 
 /* OLED Task 5: AA05发布后必须收到AA11；随后释放并再次按RIGHT发车。 */
@@ -847,9 +699,10 @@ void App_Task4Run(void)
         App_VehicleClosedLoopStop();
         return;
     }
-    App_LineLapRun(&task4LineContext, &task56ControlConfig,
-                   5U, APP_VEHICLE_TASK56_SPEED, 0,
-                   APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
+    App_LineLapRun(&task4LineContext, 5U, APP_TASK56_LINE_SPEED,
+                   APP_LINE_STOP_SLOW_RAMP,
+                   APP_TASK56_STOP_TIMEOUT_MS,
+                   APP_TASK56_STOP_RAMP_STEP);
 }
 
 /* OLED Task 6: enter the position page with one menu press.  On that page,
@@ -964,9 +817,10 @@ void App_Task5Run(void)
         break;
     case T6_TRACK:
         App_OPiDrainRuntimeStatus();
-        App_LineLapRun(&task5LineContext, &task56ControlConfig,
-                       6U, APP_VEHICLE_TASK56_SPEED, 0,
-                       APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
+        App_LineLapRun(&task5LineContext, 6U, APP_TASK56_LINE_SPEED,
+                       APP_LINE_STOP_SLOW_RAMP,
+                       APP_TASK56_STOP_TIMEOUT_MS,
+                       APP_TASK56_STOP_RAMP_STEP);
         break;
     default:
         state = T6_SELECT_POSITION;
@@ -1040,208 +894,6 @@ static void App_BatteryRun(void)
     batteryMv = BSP_ADC_BatteryReadMv();
     batteryLow = (batteryMv < APP_BATTERY_LOW_MV);
     App_MenuSetBatteryData(batteryMv, batteryLow);
-}
-
-/*
- * (旧测试函数已删除，循迹逻辑移至 App_Task1Run)
- */
-static void App_GrayscaleDisplayRun_removed(void)
-{
-    enum { T_IDLE, T_TRACKING, T_BRAKE, T_STOPPED };
-
-    const uint32_t now = BSP_Delay_GetTick();
-    uint8_t raw;
-    char line[17];
-
-    static uint8_t  state = T_IDLE;
-    static uint32_t lastTick;
-    static uint16_t crossLockout;
-    static uint8_t  crossConfirm;
-    static uint32_t detectCount;
-    static int16_t  sLeft, sRight;  /* 整形后的 PWM */
-    static uint32_t startTick;
-    static float    prevErr;    /* 滤波状态 */
-    static int16_t  trimBias;   /* 自校准偏置 */
-    static int32_t  calibSum;   /* 校准累积 */
-    static uint16_t calibCnt;   /* 校准采样数 */
-    static uint16_t calFrame;   /* 帧计数 */
-
-    uint8_t  activeCount;
-    int16_t  errorTenths;
-    uint8_t  crossNow;
-
-    if ((uint32_t)(now - lastTick) < 20U) return;
-    lastTick = now;
-
-    /* ---- 读灰度 ---- */
-    Grayscale_Read();
-    raw = Grayscale_GetRaw();
-    (void)LineTrace_CalcActiveLowWeightedError(raw, &errorTenths, &activeCount);
-
-    /* ---- 横切线实时判定：任意连续3路全黑 ---- */
-    {
-        uint8_t b0 = (((raw >> 0) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b1 = (((raw >> 1) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b2 = (((raw >> 2) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b3 = (((raw >> 3) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b4 = (((raw >> 4) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b5 = (((raw >> 5) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b6 = (((raw >> 6) & 1U) == 0U) ? 1U : 0U;
-        uint8_t b7 = (((raw >> 7) & 1U) == 0U) ? 1U : 0U;
-        crossNow = ((b0&&b1&&b2)||(b1&&b2&&b3)||(b2&&b3&&b4)
-                 ||(b3&&b4&&b5)||(b4&&b5&&b6)||(b5&&b6&&b7)) ? 1U : 0U;
-    }
-
-    /* ---- 状态机 ---- */
-    switch (state) {
-
-    case T_IDLE:
-        Set_Speed(0, 0);
-        /* 等右键按下 */
-        {
-            Key5D_Event ev = KEY5D_EVENT_NONE;
-            if (App_InputPoll(now, &ev) && ev == KEY5D_EVENT_PRESSED
-                && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
-                state = T_TRACKING;
-                Encoder_Init();
-                LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
-                detectCount = 0U;
-                sLeft = sRight = 600;
-                prevErr = 0.0f;
-                calibSum = 0;
-                calibCnt = 0;
-                calFrame = 0;
-                trimBias = 0;
-                startTick = now;
-                uart0_send_string("TRACK START\r\n");
-            }
-        }
-        break;
-
-    case T_TRACKING:
-        /* 横切线检测 + 计数 */
-        if (LineTrace_DetectCrossLine(raw, activeCount, &crossLockout, &crossConfirm)
-            == CROSS_LINE_DETECTED) {
-            detectCount++;
-            state = T_BRAKE;
-            uart0_send_string("STOP LINE!\r\n");
-            break;
-        }
-
-        /* 循迹修正：P 控制 + 固定偏置补偿机械不对称 */
-        {
-            int16_t err = errorTenths;
-            int16_t corr;
-            static uint8_t lostCnt;
-            float fe;
-            #define CALIB_FRAMES 200           /* 前200帧(~4s)校准 */
-            #define CALIB_SKIP    20           /* 跳过前20帧(车未稳) */
-
-            /* 丢线处理 */
-            if (activeCount == 0U) {
-                lostCnt++;
-                err = (prevErr > 0) ? (int16_t)(prevErr * 1.5f) : (int16_t)(prevErr * 1.5f);
-                if (lostCnt > 60U) { Set_Speed(0, 0); state = T_STOPPED; break; }
-            } else {
-                lostCnt = 0U;
-                if (err >= -3 && err <= 3) err = 0;
-                fe = (float)err;
-                fe = 0.7f * prevErr + 0.3f * fe;
-                prevErr = fe;
-                err = (int16_t)fe;
-            }
-
-            /* 校准：跳过起步不稳，|err|<5 时采样，×1.5 补偿 */
-            calFrame++;
-            if (calibCnt < CALIB_FRAMES && calFrame > CALIB_SKIP) {
-                if (err >= -5 && err <= 5) {
-                    calibSum += err;
-                    calibCnt++;
-                }
-            }
-            if (calibCnt > 0) {
-                trimBias = (int16_t)((-calibSum * 3) / ((int32_t)calibCnt * 2));
-            }
-
-            /* P 修正 + 自校准偏置 */
-            corr = (int16_t)(((int32_t)err * 12) / 10) + trimBias;
-            if (corr > 150) corr = 150;
-            if (corr < -150) corr = -150;
-
-            /* 目标 PWM */
-            int16_t tl = (int16_t)(600 + corr);
-            int16_t tr = (int16_t)(600 - corr);
-            int16_t d;
-            if (tl < 0) tl = 0; if (tl > 1800) tl = 1800;
-            if (tr < 0) tr = 0; if (tr > 1800) tr = 1800;
-
-            /* 变化率限制（更平缓） */
-            int16_t rate = (sLeft < 200) ? 80 : 30;
-            d = (int16_t)(tl - sLeft);
-            if (d > rate) sLeft += rate; else if (d < -rate) sLeft -= rate; else sLeft = tl;
-            d = (int16_t)(tr - sRight);
-            if (d > rate) sRight += rate; else if (d < -rate) sRight -= rate; else sRight = tr;
-
-            Set_Speed((int)sLeft, (int)sRight);
-        }
-        break;
-
-    case T_BRAKE:
-        /* 平缓减速：直接停转，靠惯性滑行 */
-        Set_Speed(0, 0);
-        state = T_STOPPED;
-        uart0_send_string("STOPPED\r\n");
-        break;
-
-    case T_STOPPED:
-        /* 保持停车 */
-        /* 按右键重新开始 */
-        {
-            Key5D_Event ev = KEY5D_EVENT_NONE;
-            if (App_InputPoll(now, &ev) && ev == KEY5D_EVENT_PRESSED
-                && App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
-                state = T_TRACKING;
-                LineTrace_ResetCrossDetect(&crossLockout, &crossConfirm);
-                detectCount = 0U;
-                sLeft = sRight = 600;
-                prevErr = 0.0f;
-                calibSum = 0;
-                calibCnt = 0;
-                calFrame = 0;
-                trimBias = 0;
-                startTick = now;
-                uart0_send_string("TRACK START\r\n");
-            }
-        }
-        break;
-    }
-
-    /* ---- OLED ---- */
-    OLED_ClearBuffer();
-
-    (void)snprintf(line, sizeof(line), "%u%u%u%u%u%u%u%u",
-                   (unsigned)((raw >> 7) & 1), (unsigned)((raw >> 6) & 1),
-                   (unsigned)((raw >> 5) & 1), (unsigned)((raw >> 4) & 1),
-                   (unsigned)((raw >> 3) & 1), (unsigned)((raw >> 2) & 1),
-                   (unsigned)((raw >> 1) & 1), (unsigned)(raw & 1));
-    OLED_ShowString(0U, 0U, line, 16U, 1U);
-
-    (void)snprintf(line, sizeof(line), "STOP:%s %s",
-                   crossNow ? "YES" : "no ",
-                   (state == T_IDLE) ? "RIGHT->go" :
-                   (state == T_STOPPED) ? "DONE" : "");
-    OLED_ShowString(0U, 16U, line, 16U, 1U);
-
-    (void)snprintf(line, sizeof(line), "C:%lu T:%d sL=%d",
-                   (unsigned long)detectCount, (int)trimBias, (int)sLeft);
-    OLED_ShowString(0U, 32U, line, 16U, 1U);
-
-    (void)snprintf(line, sizeof(line), "0x%02X t=%lus",
-                   (unsigned)raw,
-                   (unsigned long)((now - startTick) / 1000UL));
-    OLED_ShowString(0U, 48U, line, 16U, 1U);
-
-    OLED_Refresh();
 }
 
 /**

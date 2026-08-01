@@ -5,7 +5,7 @@ set "WORKSPACE=%~1"
 set "DSLITE=%~2"
 
 if "%WORKSPACE%"=="" set "WORKSPACE=%CD%"
-if "%DSLITE%"=="" set "DSLITE=D:\ti\CCS\ccs\ccs_base\DebugServer\bin\DSLite.exe"
+if "%DSLITE%"=="" set "DSLITE=D:\APPs\TI\Unflsh\dslite.bat"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass ^
     -File "%WORKSPACE%\tools\vscode\flash-dslite-jlink.ps1" ^

@@ -73,6 +73,9 @@ void App_MenuSetTaskControlReady(bool ready);
 /* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
 void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
 
+/* Task 2F/2L 主动制动：反向速度 PID 公共输出并保留巡线差速。 */
+void App_VehicleClosedLoopSetActiveBrake(bool enabled);
+
 /* 退出速度闭环并清空 PID 状态，不改写当前电机 PWM。 */
 void App_VehicleClosedLoopDisable(void);
 
@@ -81,6 +84,10 @@ void App_VehicleClosedLoopStop(void);
 
 /* 获取左右轮闭环目标的平均值，供低频菜单刷新使用。 */
 float App_VehicleClosedLoopGetAverageTarget(void);
+
+float App_VehicleGetLineKp(void);
+void App_VehicleSetLineTelemetry(uint8_t raw, int16_t error,
+                                 float correction);
 
 /* 将最近一次按键 ADC 值同步到菜单显示数据中。 */
 /**

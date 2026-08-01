@@ -1,7 +1,7 @@
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
-const ccxml = path.join(projectRoot, "targetConfigs", "MSPM0G3507.ccxml");
+const ccxml = path.join(projectRoot, "tools", "vscode", "MSPM0G3507-jlink.ccxml");
 const program = path.join(projectRoot, "Debug", "cy_template.out");
 
 const ds = initScripting();
