@@ -3,7 +3,7 @@
 ## 当前两任务调参固件
 
 - `Task 1 Speed`：平滑加速到 `S`，定速 3 秒，平滑减速到零，停稳后换向循环。
-- `Task 2 Trace`：8 路灰度加权循迹；大偏差快速滤波、小偏差慢滤波，带死区、PD 和弯道降速；不检测停车线，丢线保持上一拍目标。
+- `Task 2 Trace`：8 路灰度加权循迹；停车线触发后继续循迹，反向速度PID公共输出主动制动，速度接近零后关断。
 - 当前只配置 UART0（115200 baud），UART2/香橙派和 UART3 已移除。
 
 VOFA+ 下行命令以换行结束，逗号也可替换成 `=` 或 `:`：
@@ -23,7 +23,7 @@ VOFA+ 上行使用 JustFloat，共 11 个通道：左目标、左实际、右目
 ```text
 74HC165 读取 8 路灰度（低有效）
     → D1~D8 加权重心计算
-    → 大/小偏差自适应滤波 + 中心死区
+    → 统一低强度灰度滤波（约1/3旧 + 2/3当前）+ 中心死区
     → 灰度 PD 方向修正 + 弯道基准降速
     → 左右轮目标速度（base ± correction）
     → 编码器 20 ms 测速
@@ -40,12 +40,13 @@ VOFA+ 上行使用 JustFloat，共 11 个通道：左目标、左实际、右目
 |---|---:|---|---|
 | 基准速度 `S` | 60 cm/s | `App/app_config.h` 的 `APP_VEHICLE_DEFAULT_SPEED` | `S,60` |
 | 速度环 Kp / Ki / Kd | 11.5 / 0.3 / 0.1 | `App/app_vehicle.c` 的 `leftSpeedPid`、`rightSpeedPid` | `KP,11.5` / `KI,0.3` / `KD,0.1` |
-| 灰度 Kp | 1.0 | `App/app_config.h` 的 `APP_LINE_DEFAULT_KP` | `ki,1.0` |
-| 灰度 Kd | 0.10 | `App/app_config.h` 的 `APP_LINE_FIXED_KD` | 当前固定，需改代码 |
-| 8 路权重 | -70,-50,-30,-10,10,30,50,70 | `Module/LineTrace/line_trace.c` 的 `lineWeights` | 不支持 |
-| 快速滤波阈值 | 误差 35 / 变化量 25 | `APP_LINE_FAST_ERROR` / `APP_LINE_FAST_DELTA` | 不支持 |
-| 中心死区 | 12 | `APP_LINE_CENTER_DEADBAND` | 不支持 |
+| 灰度 Kp | 0.85 | `App/app_config.h` 的 `APP_LINE_DEFAULT_KP` | `ki,0.85` |
+| 灰度 Kd | 0.08 | `App/app_config.h` 的 `APP_LINE_FIXED_KD` | 当前固定，需改代码 |
+| 8 路权重 | -50,-42,-28,-10,10,28,42,50 | `Module/LineTrace/line_trace.c` 的 `lineWeights` | 不支持 |
+| 灰度滤波 | 约33%旧值 + 67%当前值 | `Module/LineTrace/line_trace.c` | 不支持 |
+| 中心死区 | 4 | `APP_LINE_CENTER_DEADBAND` | 不支持 |
 | 弯道降速 / 最低速度比例 | 0.30 / 0.45 | `APP_LINE_CURVE_SLOWDOWN_GAIN` / `APP_LINE_MINIMUM_SPEED_RATIO` | 不支持 |
+| 修正限幅 / 每周期变化 | 30 / 6 cm/s | `APP_LINE_CORRECTION_MAX` / `APP_LINE_CORRECTION_SLEW_STEP` | 不支持 |
 | 速度 PID 输出限幅 | ±1800 | `APP_VEHICLE_PID_OUT_MAX/MIN` | 不支持 |
 
 ## 多人协作先看：`.vscode` 不上传

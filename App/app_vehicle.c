@@ -15,6 +15,7 @@ volatile int16_t g_vehicle_line_error_tenths;
 
 static bool vehicleInitialized;
 static bool speedLoopEnabled;
+static bool activeBrakeEnabled;
 static float commandSpeed = APP_VEHICLE_DEFAULT_SPEED;
 static float lineKp = APP_LINE_DEFAULT_KP;
 static float lineCorrection;
@@ -55,6 +56,11 @@ static float App_VehicleClampFloat(float value, float minimum, float maximum)
         return maximum;
     }
     return value;
+}
+
+static float App_VehicleAbsFloat(float value)
+{
+    return (value >= 0.0f) ? value : -value;
 }
 
 static void App_VehicleResetPid(PID_t *pid)
@@ -235,9 +241,15 @@ void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget)
     speedLoopEnabled = true;
 }
 
+void App_VehicleClosedLoopSetActiveBrake(bool enabled)
+{
+    activeBrakeEnabled = enabled;
+}
+
 void App_VehicleClosedLoopDisable(void)
 {
     speedLoopEnabled = false;
+    activeBrakeEnabled = false;
     App_VehicleResetPid(&leftSpeedPid);
     App_VehicleResetPid(&rightSpeedPid);
 }
@@ -288,8 +300,29 @@ void App_VehicleControlRun(void)
         rightSpeedPid.Actual = Motor2_Speed;
         PID_Update(&leftSpeedPid);
         PID_Update(&rightSpeedPid);
-        Motor_ApplySpeedLoopOutput((int)leftSpeedPid.Out,
-                                   (int)rightSpeedPid.Out);
+        if (activeBrakeEnabled) {
+            float brakeCommon =
+                (App_VehicleAbsFloat(leftSpeedPid.Out) +
+                 App_VehicleAbsFloat(rightSpeedPid.Out)) * 0.5f;
+            float steering =
+                (rightSpeedPid.Out - leftSpeedPid.Out) * 0.5f;
+            float steeringLimit;
+
+            brakeCommon = App_VehicleClampFloat(
+                brakeCommon, 0.0f, APP_TASK2_ACTIVE_BRAKE_PWM_MAX);
+            steeringLimit = App_VehicleClampFloat(
+                brakeCommon, 0.0f, APP_TASK2_ACTIVE_BRAKE_STEER_MAX);
+            steering = App_VehicleClampFloat(
+                steering, -steeringLimit, steeringLimit);
+
+            /* 公共量反向制动；差速方向保持，使滑行阶段继续贴线。 */
+            Motor_ApplySpeedLoopOutput(
+                (int)(-brakeCommon - steering),
+                (int)(-brakeCommon + steering));
+        } else {
+            Motor_ApplySpeedLoopOutput((int)leftSpeedPid.Out,
+                                       (int)rightSpeedPid.Out);
+        }
     } else if (!speedLoopEnabled) {
         lastControlTick = now;
     }

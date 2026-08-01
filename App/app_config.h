@@ -26,20 +26,28 @@
 #define APP_TASK1_ZERO_DWELL_MS (300U)
 #define APP_TASK1_RAMP_STEP (2.0f)
 
+/* fa2011f Task 2 停车线：起步屏蔽、里程门槛和闭环缓停时间。 */
+#define APP_TASK2_CROSS_LOCKOUT_FRAMES (80U)
+#define APP_TASK2_CROSS_MIN_ENC_AVG (24000U)
+#define APP_TASK2_SLOW_STOP_DURATION_MS (50U)
+#define APP_TASK2_ACTIVE_BRAKE_PWM_MAX (1000.0f)
+#define APP_TASK2_ACTIVE_BRAKE_STEER_MAX (300.0f)
+#define APP_TASK2_ACTIVE_BRAKE_STOP_SPEED (3.0f)
+
 /* VOFA 默认值和安全范围。S 同时作为 Task 1 定速值和 Task 2 巡航速度。 */
-#define APP_VEHICLE_DEFAULT_SPEED (55.0f)
+#define APP_VEHICLE_DEFAULT_SPEED (100.0f)
 #define APP_VOFA_SPEED_MAX (200.0f)
 #define APP_VOFA_SPEED_PID_GAIN_MAX (200.0f)
 #define APP_VOFA_LINE_KP_MAX (10.0f)
 
-/* 参考工程灰度外环：大偏差快滤波、小偏差慢滤波、死区、PD和弯道降速。 */
-#define APP_LINE_FAST_ERROR (35)
-#define APP_LINE_FAST_DELTA (25)
-#define APP_LINE_CENTER_DEADBAND (12)
-#define APP_LINE_DEFAULT_KP (1.0f)
-#define APP_LINE_FIXED_KD (0.10f)
+/* 灰度外环：低强度统一滤波、死区、PD、修正斜率限制和弯道降速。 */
+#define APP_LINE_CENTER_DEADBAND (4)
+#define APP_LINE_DEFAULT_KP (0.85f)
+#define APP_LINE_FIXED_KD (0.08f)
 #define APP_LINE_CURVE_SLOWDOWN_GAIN (0.30f)
 #define APP_LINE_MINIMUM_SPEED_RATIO (0.45f)
+#define APP_LINE_CORRECTION_MAX (30.0f)
+#define APP_LINE_CORRECTION_SLEW_STEP (6.0f)
 
 #define APP_VEHICLE_PID_OUT_MAX (1800.0f)
 #define APP_VEHICLE_PID_OUT_MIN (-1800.0f)

@@ -67,6 +67,9 @@ void App_MenuReturnToTaskList(void);
 /* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
 void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
 
+/* 主动刹车：反向速度PID公共输出，保留左右差速用于循迹。 */
+void App_VehicleClosedLoopSetActiveBrake(bool enabled);
+
 /* 退出速度闭环并清空 PID 状态，不改写当前电机 PWM。 */
 void App_VehicleClosedLoopDisable(void);
 

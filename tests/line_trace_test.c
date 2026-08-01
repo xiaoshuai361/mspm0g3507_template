@@ -20,11 +20,11 @@ static uint32_t LineTrace_TestWeightedError(void)
     CHECK(LineTrace_CalcActiveLowWeightedError(0xE7U, &error, &count) != 0U);
     CHECK((error == 0) && (count == 2U));
     CHECK(LineTrace_CalcActiveLowWeightedError(0xFEU, &error, &count) != 0U);
-    CHECK((error == -70) && (count == 1U));
+    CHECK((error == -50) && (count == 1U));
     CHECK(LineTrace_CalcActiveLowWeightedError(0x7FU, &error, &count) != 0U);
-    CHECK((error == 70) && (count == 1U));
+    CHECK((error == 50) && (count == 1U));
     CHECK(LineTrace_CalcActiveLowWeightedError(0xFCU, &error, &count) != 0U);
-    CHECK((error == -60) && (count == 2U));
+    CHECK((error == -46) && (count == 2U));
     CHECK(LineTrace_CountActiveLow(0x00U) == 8U);
     return failures;
 }
@@ -33,13 +33,13 @@ static uint32_t LineTrace_TestController(void)
 {
     uint32_t failures = 0U;
     const LineTrace_ControlConfig config = {
-        .fastErrorThreshold = 35,
-        .fastDeltaThreshold = 25,
         .centerDeadband = 12,
         .steeringKp = 1.0f,
         .steeringKd = 0.1f,
         .curveSlowdownGain = 0.3f,
         .minimumSpeedRatio = 0.45f,
+        .correctionMax = 30.0f,
+        .correctionSlewStep = 4.0f,
     };
     LineTrace_Controller controller;
     LineTrace_ControlOutput output;
@@ -49,15 +49,15 @@ static uint32_t LineTrace_TestController(void)
     CHECK(output.valid != 0U);
     CHECK((output.leftTarget == 60.0f) && (output.rightTarget == 60.0f));
 
-    /* 小偏差只引入 1/4 新值并落在死区内。 */
+    /* 低强度滤波：约1/3旧值 + 2/3当前值。 */
     LineTrace_ControllerReset(&controller);
     LineTrace_ControllerStep(&controller, &config, 1U, 10, 60.0f, &output);
-    CHECK((output.filteredError == 2) && (output.correction == 0.0f));
+    CHECK((output.filteredError == 6) && (output.correction == 0.0f));
 
-    /* 大偏差使用 2/3 新值，立即产生转向和弯道降速。 */
+    /* 大偏差更快跟随，修正量首拍仍最多变化4。 */
     LineTrace_ControllerReset(&controller);
     LineTrace_ControllerStep(&controller, &config, 1U, 70, 60.0f, &output);
-    CHECK(output.filteredError == 46);
+    CHECK((output.filteredError == 46) && (output.correction == 4.0f));
     CHECK(output.leftTarget < output.rightTarget);
     CHECK(output.baseTarget < 60.0f);
 
@@ -67,7 +67,28 @@ static uint32_t LineTrace_TestController(void)
     return failures;
 }
 
+static uint32_t LineTrace_TestCrossLine(void)
+{
+    uint32_t failures = 0U;
+    uint16_t lockout = 0U;
+    uint8_t confirm = 1U;
+
+    CHECK(LineTrace_DetectCrossLine(0xF8U, 3U, &lockout, &confirm) ==
+          CROSS_LINE_DETECTED);
+    CHECK((lockout == 80U) && (confirm == 0U));
+
+    lockout = 1U;
+    CHECK(LineTrace_DetectCrossLine(0xF8U, 3U, &lockout, &confirm) ==
+          CROSS_LINE_NONE);
+    CHECK(lockout == 0U);
+
+    CHECK(LineTrace_DetectCrossLine(0xF0U, 4U, &lockout, &confirm) ==
+          CROSS_LINE_NONE);
+    return failures;
+}
+
 uint32_t LineTrace_RunSelfTest(void)
 {
-    return LineTrace_TestWeightedError() + LineTrace_TestController();
+    return LineTrace_TestWeightedError() + LineTrace_TestController() +
+           LineTrace_TestCrossLine();
 }

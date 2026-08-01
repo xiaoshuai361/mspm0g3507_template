@@ -3,19 +3,25 @@
 
 #include <stdint.h>
 
+typedef enum {
+    CROSS_LINE_NONE = 0,
+    CROSS_LINE_DETECTED = 1,
+} CrossLine_Type;
+
 typedef struct {
-    int16_t fastErrorThreshold;
-    int16_t fastDeltaThreshold;
     int16_t centerDeadband;
     float steeringKp;
     float steeringKd;
     float curveSlowdownGain;
     float minimumSpeedRatio;
+    float correctionMax;
+    float correctionSlewStep;
 } LineTrace_ControlConfig;
 
 typedef struct {
     int16_t filteredError;
     int16_t lastSteeringError;
+    float appliedCorrection;
 } LineTrace_Controller;
 
 typedef struct {
@@ -32,6 +38,13 @@ uint8_t LineTrace_CalcActiveLowWeightedError(uint8_t raw,
                                              int16_t *errorTenths,
                                              uint8_t *activeCount);
 uint8_t LineTrace_CountActiveLow(uint8_t raw);
+
+/* fa2011f：任意位置恰好三路低有效时判定停车线。 */
+CrossLine_Type LineTrace_DetectCrossLine(uint8_t raw, uint8_t activeCount,
+                                         uint16_t *lockoutFrames,
+                                         uint8_t *confirmCount);
+void LineTrace_ResetCrossDetect(uint16_t *lockoutFrames,
+                                uint8_t *confirmCount);
 
 void LineTrace_ControllerReset(LineTrace_Controller *controller);
 void LineTrace_ControllerStep(LineTrace_Controller *controller,
