@@ -3,11 +3,11 @@
 enum {
     UART0_TX_BUFFER_SIZE = 256U,
     VOFA_COMMAND_BUFFER_SIZE = 32U,
-    VOFA_JUSTFLOAT_MAX_CHANNELS = 8U
+    VOFA_JUSTFLOAT_MAX_CHANNELS = 12U
 };
 
 #define UART0_IO_ENABLED (1U)
-#define UART0_LOCAL_OUTPUT_ENABLED (0U)
+#define UART0_LOCAL_OUTPUT_ENABLED (1U)
 
 static uint8_t uart0TxBuffer[UART0_TX_BUFFER_SIZE];
 static volatile uint16_t uart0TxHead;
@@ -99,41 +99,6 @@ uint8_t uart0_write_nonblocking(const uint8_t *data, uint16_t len)
     return uart0_queue_write_nonblocking(data, len);
 }
 
-uint8_t uart0_bridge_write_nonblocking(const uint8_t *data, uint16_t len)
-{
-    return uart0_queue_write_nonblocking(data, len);
-}
-
-/* ================================================================
- *  UART3 — 灰度传感器数据上传（TX=PA14, RX=PA13, 115200bps）
- * ================================================================ */
-/**
- * @brief 通过 UART3 发送一个字符。
- * @param ch 待发送字符。
- * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
- * @retval 无。
- */
-void uart3_send_char(char ch)
-{
-    while (DL_UART_Main_isBusy(UART_3_INST) == true)
-        ;
-    DL_UART_Main_transmitData(UART_3_INST, ch);
-}
-
-/**
- * @brief 通过 UART3 发送字符串。
- * @param str 待发送字符串。
- * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
- * @retval 无。
- */
-void uart3_send_string(const char *str)
-{
-    if (str == NULL)
-        return;
-    while (*str != '\0')
-        uart3_send_char(*str++);
-}
-
 /* ================================================================
  *  UART0 基础收发
  * ================================================================ */
@@ -165,7 +130,6 @@ void uart0_init(void)
     DL_UART_Main_disableInterrupt(UART_0_INST, DL_UART_MAIN_INTERRUPT_TX);
     NVIC_ClearPendingIRQ(UART_0_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
-    uart0_send_string("UART0 Ready\r\n");
 }
 
 /**

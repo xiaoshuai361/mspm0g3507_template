@@ -16,10 +16,6 @@ static Menu_State menuState; /**< menuState 全局状态或配置变量。 */
 static Menu_ViewData menuData; /**< menuData 全局状态或配置变量。 */
 static uint32_t lastDisplayTick; /**< lastDisplayTick 全局状态或配置变量。 */
 
-enum {
-    APP_MENU_READY_BLINK_HALF_PERIOD_MS = 400U
-};
-
 /**
  * @brief 将 float 速度转换为菜单使用的 0.1 单位，并做 int16_t 饱和保护。
  * @param speed 速度值。
@@ -105,19 +101,9 @@ void App_MenuSetKeyAdc(uint16_t rawAdc)
  */
 static void App_HandleMenuKeyPress(Key5D_Key key)
 {
-    char message[32];
-    const uint8_t previousTask = Menu_GetActiveTask(&menuState);
-
     App_LogKeyPress(key);
     Menu_HandleInput(&menuState, App_InputToMenu(key));
     g_active_task = Menu_GetActiveTask(&menuState);
-
-    if (g_active_task != previousTask)
-    {
-        (void)snprintf(message, sizeof(message), "ACTIVE TASK=%u\r\n",
-                       (unsigned int)g_active_task);
-        uart0_send_string(message);
-    }
 }
 
 static void App_MenuPollInput(uint32_t now)
@@ -141,11 +127,8 @@ void App_MenuInputRun(void)
 
 void App_MenuReturnToTaskList(void)
 {
-    menuData.taskControlReady = false;
-    menuData.taskReadyBlinkVisible = false;
     Menu_ReturnToTaskList(&menuState);
     g_active_task = 0U;
-    uart0_send_string("ACTIVE TASK=0\r\n");
 }
 
 /**
@@ -157,14 +140,11 @@ void App_MenuReturnToTaskList(void)
 void App_MenuRun(void)
 {
     const uint32_t now = BSP_Delay_GetTick();
-    const bool readyBlinkVisible = menuData.taskControlReady &&
-        (((now / APP_MENU_READY_BLINK_HALF_PERIOD_MS) & 1U) == 0U);
     const bool shouldRender = Menu_IsDirty(&menuState) ||
         (Menu_IsDynamicPage(&menuState) &&
          ((uint32_t)(now - lastDisplayTick) >=
           APP_MENU_DYNAMIC_DISPLAY_PERIOD_MS));
 
-    menuData.taskReadyBlinkVisible = readyBlinkVisible;
     App_MenuPollInput(now);
 
     if (!shouldRender && !Menu_IsDirty(&menuState)) {
@@ -177,19 +157,6 @@ void App_MenuRun(void)
     menuData.encoderRight = Encoder_CumulativeR;
     lastDisplayTick = now;
     Menu_Render(&menuState, &menuData);
-}
-
-void App_MenuSetOpiBootReady(bool ready)
-{
-    menuData.opiBootReady = ready;
-}
-
-void App_MenuSetTaskControlReady(bool ready)
-{
-    menuData.taskControlReady = ready;
-    if (!ready) {
-        menuData.taskReadyBlinkVisible = false;
-    }
 }
 
 /* 更新参数查询页显示的 PID 参数，单位为 0.01。 */
