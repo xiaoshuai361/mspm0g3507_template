@@ -40,6 +40,10 @@ typedef struct {
  * @note App 层把电机、IMU、ToF、按键等模块数据写入这里，Menu_Render() 只负责读取并显示。
  */
 typedef struct {
+    bool opiBootReady;          /**< 香橙派已发送 AA 01 启动完成状态。 */
+    bool taskControlReady;      /**< 当前任务已收到 AA 11，可由操作员发车。 */
+    bool taskReadyBlinkVisible; /**< 任务菜单就绪星号当前是否显示。 */
+
     bool pidValid;              /**< PID 参数是否有效，false 时参数页显示占位内容。 */
     int16_t pidKpHundredths;    /**< Kp 参数，单位 0.01。 */
     int16_t pidKiHundredths;    /**< Ki 参数，单位 0.01。 */

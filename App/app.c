@@ -62,7 +62,7 @@ enum {
 };
 
 enum {
-    APP_LINE_CONTROL_PERIOD_MS = 10U,
+    APP_LINE_CONTROL_PERIOD_MS = 20U,
     APP_LINE_CROSS_LOCKOUT_FRAMES = 80U
 };
 
@@ -93,28 +93,28 @@ typedef struct {
 /*
  * OLED Task 2F/2L使用单一线性纠偏增益，避免偏差跨阈值时差速突变。
  * 半圆转向不足先增 steeringKp，最后才增 steeringMax。
- * 所有“帧”均为10ms，误差单位为0.1个灰度探头间距。
+ * 所有“帧”均为20ms，误差单位为0.1个灰度探头间距。
  */
 static const LineTrace_ControlConfig task1FastControlConfig = {
     .cruisePwm = APP_TASK1_LINE_CRUISE_PWM, /* 直线巡航PWM，在app_config.h中修改。 */
     .lostPwm = 700,              /* 弯道重度降速/丢线搜索下限；增大可补偿配重，但更难找回线。 */
-    .rampUpStep = 20,            /* 每帧基准PWM上升量；增大则起步和出弯加速更快。 */
-    .rampDownStep = 20,          /* 限制每帧降速，避免短时抖动造成骤降。 */
-    .curveSlowdownGain = 8,      /* 每单位绝对偏差扣除的PWM；增大可降低弯速。 */
+    .rampUpStep = 40,            /* 每帧基准PWM上升量；增大则起步和出弯加速更快。 */
+    .rampDownStep = 50,          /* 限制每帧降速，避免短时抖动造成骤降。 */
+    .curveSlowdownGain = 12,     /* 每单位绝对偏差扣除的PWM；增大可降低弯速。 */
     .slowdownEntryError = 10,    /* 小偏差只纠偏，不降低巡航基准。 */
-    .steeringKp = 16,            /* 全偏差范围线性增益；避免外侧差速跨阈值突变。 */
-    .steeringMax = 480,          /* 放宽高速档差速修正硬上限。 */
-    .steeringSlewStep = 60,      /* 每10ms差速最多变化60，避免偏差突变时瞬间反打。 */
+    .steeringKp = 18,            /* 全偏差范围线性增益；避免外侧差速跨阈值突变。 */
+    .steeringMax = 560,          /* 放宽高速档差速修正硬上限。 */
+    .steeringSlewStep = 75,      /* 每20ms差速最多变化75，避免偏差突变时瞬间反打。 */
     .leftPwmBias = 50,           /* 高速直行稳定输出：左1150、右1100。 */
-    .rightTurnBoost = 115,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
+    .rightTurnBoost = 155,       /* 两个右半圆额外提升左侧重载外轮扭矩。 */
     .centerDeadband = 5,         /* 中心死区；增大更稳但纠偏变迟，减小更灵敏但易抖。 */
     .fastErrorThreshold = 15,    /* 原始偏差达到此值使用3/4新值快滤波；减小响应更快。 */
-    .fastDeltaThreshold = 8,    /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
+    .fastDeltaThreshold = 12,     /* 相邻帧偏差跳变量阈值；减小可更快响应突然换边。 */
     .lostSearchStartError = 18,  /* 丢线搜索的初始等效偏差；增大则首次找线转向更强。 */
     .lostSearchStepFrames = 2U,  /* 搜索偏差每隔多少帧加1；减小会更快增强搜索。 */
-    .lostHoldFrames = 5U,        /* 丢线后保持最后纠偏的帧数；当前1帧即10ms。 */
-    .slowdownConfirmFrames = 3U, /* 偏差持续30ms才开始降速，滤除瞬时抖动。 */
-    .lostStopFrames = 1500U,     /* 连续丢线停车时间；当前150帧即1.5s。 */
+    .lostHoldFrames = 5U,        /* 丢线后保持最后纠偏的帧数；当前1帧即20ms。 */
+    .slowdownConfirmFrames = 3U, /* 偏差持续60ms才开始降速，滤除瞬时抖动。 */
+    .lostStopFrames = 1500U,     /* 连续丢线停车时间；当前1500帧即30s。 */
 };
 
 static const LineTrace_ControlConfig task2StableControlConfig = {
@@ -124,8 +124,8 @@ static const LineTrace_ControlConfig task2StableControlConfig = {
     .rampDownStep = 11,
     .curveSlowdownGain = 1,
     .slowdownEntryError = 8,
-    .steeringKp = 12,
-    .steeringMax = 240,
+    .steeringKp = 14,
+    .steeringMax = 360,
     .steeringSlewStep = 45,
     .leftPwmBias = 39,
     .rightTurnBoost = 70,
@@ -144,12 +144,12 @@ static const LineTrace_ControlConfig task56ControlConfig = {
     .cruisePwm = APP_STABLE_LINE_CRUISE_PWM,
     .lostPwm = 650,
     .rampUpStep = 20,            /* 恢复缓慢起步，钢球任务避免急加速球滚落。 */
-    .rampDownStep = 20,
+    .rampDownStep = 15,
     .curveSlowdownGain = 3,
     .slowdownEntryError = 9,
-    .steeringKp = 15,            /* 逼近快速版16，提升小偏差响应。 */
-    .steeringMax = 400,          /* 逼近快速版480，弯道差速不再受限。 */
-    .steeringSlewStep = 55,      /* 逼近快速版60，差速变化更快。 */
+    .steeringKp = 14,            /* 逼近快速版16，提升小偏差响应。 */
+    .steeringMax = 450,          /* 逼近快速版480，弯道差速不再受限。 */
+    .steeringSlewStep = 30,      /* 逼近快速版60，差速变化更快。 */
     .leftPwmBias = 45,
     .rightTurnBoost = 100,       /* 逼近快速版115，右弯外轮扭矩补偿。 */
     .centerDeadband = 5,
@@ -288,7 +288,30 @@ static void App_OPiDrainRuntimeStatus(void)
     uint8_t code;
 
     while (OPi_ReadFrame(&code) != 0U) {
-        App_OPiLogStatus(code, 0U);
+        if (code == OPI_STATUS_BOOT_READY) {
+            App_MenuSetOpiBootReady(true);
+        } else {
+            App_OPiLogStatus(code, 0U);
+        }
+    }
+}
+
+static void App_OPiPollControlReady(uint8_t *controlReady)
+{
+    uint8_t code;
+
+    while (OPi_ReadFrame(&code) != 0U) {
+        if (code == OPI_STATUS_BOOT_READY) {
+            App_MenuSetOpiBootReady(true);
+        } else if (code == OPI_STATUS_CONTROL_READY) {
+            if (*controlReady == 0U) {
+                *controlReady = 1U;
+                App_MenuSetTaskControlReady(true);
+                uart0_send_string("OPI: CONTROL READY\r\n");
+            }
+        } else {
+            App_OPiLogStatus(code, OPI_STATUS_CONTROL_READY);
+        }
     }
 }
 
@@ -324,7 +347,7 @@ static void App_OPiDrainIdleStatus(void)
 
     while (OPi_ReadFrame(&code) != 0U) {
         if (code == OPI_STATUS_BOOT_READY) {
-            continue;
+            App_MenuSetOpiBootReady(true);
         } else {
             App_OPiLogStatus(code, 0U);
         }
@@ -336,6 +359,7 @@ static void App_OPiStartTask(uint8_t taskCode)
     /* Consume the one-shot boot status and discard stale task statuses. */
     App_OPiDrainIdleStatus();
     OPi_FlushRx();
+    App_MenuSetTaskControlReady(false);
     OPi_SendCmd(taskCode);
     opiTaskActive = 1U;
 }
@@ -344,12 +368,14 @@ static void App_OPiStartTask6(int8_t positionTenthsCm)
 {
     App_OPiDrainIdleStatus();
     OPi_FlushRx();
+    App_MenuSetTaskControlReady(false);
     OPi_SendTask6(positionTenthsCm);
     opiTaskActive = 1U;
 }
 
 static void App_OPiAbortCurrentTask(void)
 {
+    App_MenuSetTaskControlReady(false);
     if (opiTaskActive != 0U) {
         OPi_SendCmd(OPI_CMD_ABORT);
         opiTaskActive = 0U;
@@ -614,6 +640,24 @@ static void App_Task5RenderStatus(const char *status)
     OLED_Refresh();
 }
 
+static void App_Task5UpdateReadyBlink(uint32_t now,
+                                      uint32_t *lastTick,
+                                      uint8_t *blinkVisible)
+{
+    enum { TASK6_READY_BLINK_HALF_PERIOD_MS = 400U };
+
+    if ((uint32_t)(now - *lastTick) <
+        TASK6_READY_BLINK_HALF_PERIOD_MS) {
+        return;
+    }
+
+    *lastTick = now;
+    *blinkVisible = (*blinkVisible == 0U) ? 1U : 0U;
+    App_Task5RenderStatus((*blinkVisible != 0U)
+                              ? "* READY  R=GO"
+                              : "  READY  R=GO");
+}
+
 static void App_Task5ReturnToTaskList(void)
 {
     Encoder_XZ_Disable();
@@ -623,38 +667,36 @@ static void App_Task5ReturnToTaskList(void)
     App_MenuReturnToTaskList();
 }
 
-/* OLED Task 2F/2L: the selection key starts OPI Task2.  After the
- * operator releases it, the next RIGHT press starts driving and timing. */
+/* OLED Task 2F/2L: AA02发布后必须收到AA11；随后释放并再次按RIGHT发车。 */
 void App_Task1Run(void)
 {
-    enum { TASK2_WAIT_RIGHT_RELEASE, TASK2_READY_TO_RUN };
     static uint32_t activationGeneration;
-    static uint8_t state;
+    static uint8_t controlReady;
     const float referenceSpeed = (g_active_task == 6U)
                                      ? APP_TASK1_LOW_SPEED
                                      : APP_VEHICLE_DEFAULT_SPEED;
-    const Key5D_Key stableKey = App_InputGetStableKey();
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
-        state = TASK2_WAIT_RIGHT_RELEASE;
+        controlReady = 0U;
+        task1LineContext.startKeyArmed = 0U;
         App_OPiStartTask(OPI_CMD_TASK2);
-        uart0_send_string("OPI T2: START, WAIT OPERATOR\r\n");
+        uart0_send_string("OPI T2: START, WAIT AA11\r\n");
     }
 
-    App_OPiDrainRuntimeStatus();
-
-    if (stableKey == KEY5D_KEY_LEFT) {
+    if (App_InputGetStableKey() == KEY5D_KEY_LEFT) {
         App_OPiAbortCurrentTask();
         App_MenuReturnToTaskList();
         return;
     }
 
-    if (state == TASK2_WAIT_RIGHT_RELEASE) {
+    if (controlReady == 0U) {
+        App_OPiPollControlReady(&controlReady);
+    } else {
+        App_OPiDrainRuntimeStatus();
+    }
+    if (controlReady == 0U) {
         App_VehicleClosedLoopStop();
-        if (stableKey != KEY5D_KEY_RIGHT) {
-            state = TASK2_READY_TO_RUN;
-        }
         return;
     }
 
@@ -700,9 +742,12 @@ void App_Task2Run(void)
     }
 
     while (OPi_ReadFrame(&code) != 0U) {
-        if ((state == TASK3_WAIT_READY) &&
+        if (code == OPI_STATUS_BOOT_READY) {
+            App_MenuSetOpiBootReady(true);
+        } else if ((state == TASK3_WAIT_READY) &&
             (code == OPI_STATUS_CONTROL_READY)) {
             state = TASK3_WAIT_RIGHT_RELEASE;
+            App_MenuSetTaskControlReady(true);
             uart0_send_string("OPI T3: READY\r\n");
         } else if ((state == TASK3_WAIT_DONE) &&
                    (code == OPI_STATUS_TASK3_DONE)) {
@@ -742,48 +787,66 @@ void App_Task2Run(void)
     }
 }
 
-/* OLED Task 4: first RIGHT sends AA04; after release, the next RIGHT starts
- * the car task and timer. */
+/* OLED Task 4: AA04发布后必须收到AA11；随后释放并再次按RIGHT发车。 */
 void App_Task3Run(void)
 {
     static uint32_t activationGeneration;
+    static uint8_t controlReady;
     const Key5D_Key stableKey = App_InputGetStableKey();
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
+        controlReady = 0U;
         App_OPiStartTask(OPI_CMD_TASK4);
         task3LineContext.startKeyArmed = 0U;
-        uart0_send_string("OPI T4: ENABLE, WAIT OPERATOR\r\n");
+        uart0_send_string("OPI T4: ENABLE, WAIT AA11\r\n");
     }
     if (stableKey == KEY5D_KEY_LEFT) {
         App_OPiAbortCurrentTask();
         App_MenuReturnToTaskList();
         return;
     }
-    App_OPiDrainRuntimeStatus();
+    if (controlReady == 0U) {
+        App_OPiPollControlReady(&controlReady);
+    } else {
+        App_OPiDrainRuntimeStatus();
+    }
+    if (controlReady == 0U) {
+        App_VehicleClosedLoopStop();
+        return;
+    }
     App_LineLapRun(&task3LineContext, &task2StableControlConfig,
                    4U, APP_VEHICLE_DEFAULT_SPEED, 0, 0U, 0U);
 }
 
-/* OLED Task 5: first RIGHT sends AA05; after release, the next RIGHT starts
- * the car task and timer. */
+/* OLED Task 5: AA05发布后必须收到AA11；随后释放并再次按RIGHT发车。 */
 void App_Task4Run(void)
 {
     static uint32_t activationGeneration;
+    static uint8_t controlReady;
     const Key5D_Key stableKey = App_InputGetStableKey();
 
     if (activationGeneration != taskActivationGeneration) {
         activationGeneration = taskActivationGeneration;
+        controlReady = 0U;
         App_OPiStartTask(OPI_CMD_TASK5);
         task4LineContext.startKeyArmed = 0U;
-        uart0_send_string("OPI T5: ENABLE, WAIT OPERATOR\r\n");
+        uart0_send_string("OPI T5: ENABLE, WAIT AA11\r\n");
     }
     if (stableKey == KEY5D_KEY_LEFT) {
         App_OPiAbortCurrentTask();
         App_MenuReturnToTaskList();
         return;
     }
-    App_OPiDrainRuntimeStatus();
+    if (controlReady == 0U) {
+        App_OPiPollControlReady(&controlReady);
+    } else {
+        App_OPiDrainRuntimeStatus();
+    }
+    if (controlReady == 0U) {
+        App_VehicleClosedLoopStop();
+        return;
+    }
     App_LineLapRun(&task4LineContext, &task56ControlConfig,
                    5U, APP_VEHICLE_TASK56_SPEED, 0,
                    APP_TASK56_SLOW_STOP_DURATION_MS, 0U);
@@ -795,12 +858,15 @@ void App_Task5Run(void)
 {
     enum {
         T6_SELECT_POSITION,
+        T6_WAIT_CONTROL_READY,
         T6_WAIT_RUN_RELEASE,
         T6_READY_TO_RUN,
         T6_TRACK
     };
     static uint8_t state = T6_SELECT_POSITION;
     static uint8_t rightKeyArmed;
+    static uint8_t controlReady;
+    static uint8_t readyBlinkVisible;
     static int16_t psTenths;
     static int16_t lastDisplayPsTenths = 32767;
     static uint32_t lastDisplayTick;
@@ -810,6 +876,8 @@ void App_Task5Run(void)
         task5ResetPending = 0U;
         state = T6_SELECT_POSITION;
         rightKeyArmed = 0U;
+        controlReady = 0U;
+        readyBlinkVisible = 0U;
         psTenths = 0;
         lastDisplayPsTenths = 32767;
         lastDisplayTick = 0U;
@@ -852,14 +920,32 @@ void App_Task5Run(void)
         } else if (rightKeyArmed != 0U) {
             rightKeyArmed = 0U;
             Encoder_XZ_Disable();
+            controlReady = 0U;
             App_OPiStartTask6((int8_t)psTenths);
-            App_Task5RenderStatus("WAIT MOTOR R=GO");
-            state = T6_WAIT_RUN_RELEASE;
+            App_Task5RenderStatus("WAIT AA11");
+            state = T6_WAIT_CONTROL_READY;
         }
         break; }
+    case T6_WAIT_CONTROL_READY:
+        App_VehicleClosedLoopStop();
+        App_OPiPollControlReady(&controlReady);
+        if (controlReady != 0U) {
+            lastDisplayTick = BSP_Delay_GetTick() - 400U;
+            readyBlinkVisible = 0U;
+            App_Task5UpdateReadyBlink(BSP_Delay_GetTick(),
+                                      &lastDisplayTick,
+                                      &readyBlinkVisible);
+            state = (App_InputGetStableKey() == KEY5D_KEY_RIGHT)
+                        ? T6_WAIT_RUN_RELEASE
+                        : T6_READY_TO_RUN;
+        }
+        break;
     case T6_WAIT_RUN_RELEASE:
         App_VehicleClosedLoopStop();
         App_OPiDrainRuntimeStatus();
+        App_Task5UpdateReadyBlink(BSP_Delay_GetTick(),
+                                  &lastDisplayTick,
+                                  &readyBlinkVisible);
         if (App_InputGetStableKey() != KEY5D_KEY_RIGHT) {
             state = T6_READY_TO_RUN;
         }
@@ -867,6 +953,9 @@ void App_Task5Run(void)
     case T6_READY_TO_RUN:
         App_VehicleClosedLoopStop();
         App_OPiDrainRuntimeStatus();
+        App_Task5UpdateReadyBlink(BSP_Delay_GetTick(),
+                                  &lastDisplayTick,
+                                  &readyBlinkVisible);
         if (App_InputGetStableKey() == KEY5D_KEY_RIGHT) {
             App_LineLapStart(&task5LineContext, 6U);
             task5OwnsInterface = 0U;

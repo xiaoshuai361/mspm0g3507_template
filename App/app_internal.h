@@ -64,6 +64,12 @@ void App_MenuInputRun(void);
 /* 结束当前任务并返回任务列表，供拥有独立交互页面的任务使用。 */
 void App_MenuReturnToTaskList(void);
 
+/* 发布香橙派启动状态，供一级菜单第三行显示 READY。 */
+void App_MenuSetOpiBootReady(bool ready);
+
+/* 发布当前香橙派任务的 AA 11 就绪状态，供任务星号闪烁。 */
+void App_MenuSetTaskControlReady(bool ready);
+
 /* 设置左右轮速度闭环目标；目标值使用编码器测速的同一单位。 */
 void App_VehicleClosedLoopSetTarget(float leftTarget, float rightTarget);
 

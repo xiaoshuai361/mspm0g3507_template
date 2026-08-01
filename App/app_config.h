@@ -31,17 +31,17 @@
 #define APP_TASK1_BRAKE_PWM (1000)          /**< Task 1停车线触发后的反向制动 PWM。 */
 #define APP_TASK1_BRAKE_DURATION_MS (190U) /**< Task 1反向制动持续时间。 */
 #define APP_TASK1_BRAKE_DELAY_PULSES (0U)  /**< 检测停车线后继续前进的左右编码器绝对增量之和；0=立即制动。 */
-#define APP_TASK2_CROSS_MIN_ENC_AVG (23000) /**< Task 2 两轮平均编码器增量阈值，超过后才启用横切线停车判断，防止起步误触发。 */
-#define APP_TASK2_SLOW_STOP_DURATION_MS (600U) /**< Task 2 检测停车线后巡线减速缓停时间，替代反向PWM制动。 */
+#define APP_TASK2_CROSS_MIN_ENC_AVG (24000) /**< Task 2 两轮平均编码器增量阈值，超过后才启用横切线停车判断，防止起步误触发。 */
+#define APP_TASK2_SLOW_STOP_DURATION_MS (300U) /**< Task 2 检测停车线后巡线减速缓停时间，替代反向PWM制动。 */
 #define APP_TASK56_SLOW_STOP_DURATION_MS (800U) /**< Task 5/6扫到停车线后的闭环缓停时间。 */
 #define APP_VEHICLE_TASK56_SPEED (123.0f)  /**< Task 5/6 钢球任务目标速度，比默认150.0低约18%。 */
 
 #define APP_VEHICLE_DEFAULT_SPEED (150.0f)  /**< f62ded5 整定后的车辆默认目标速度。 */
 #define APP_TASK1_LOW_SPEED (100.0f)        /**< OLED Task 2L闭环速度换算基准。 */
-#define APP_VEHICLE_LINE_PERIOD_MS (10U)    /**< 灰度循迹读取周期，单位 ms；灰度读取轻，保留快速响应。 */
-#define APP_LINE_OUTER_FILTER_FRAMES (1U)   /**< D1/D8最外侧灰度连续稳定帧数；1=不滤波，3约为30ms。 */
-#define APP_VEHICLE_SPEED_PERIOD_MS (20U)   /**< 编码器测速周期，单位 ms；降低抖动和 CPU 占用。 */
-#define APP_VEHICLE_CONTROL_PERIOD_MS (20U) /**< 速度 PID 控制周期，单位 ms；50Hz 控制兼顾响应和负载。 */
+#define APP_VEHICLE_LINE_PERIOD_MS (20U)    /**< 灰度循迹读取周期，单位 ms；50Hz执行。 */
+#define APP_LINE_OUTER_FILTER_FRAMES (1U)   /**< D1/D8最外侧灰度连续稳定帧数；1=不滤波，3约为60ms。 */
+#define APP_VEHICLE_SPEED_PERIOD_MS (20U)   /**< 编码器测速周期，单位 ms；与速度 PID 同步为50Hz。 */
+#define APP_VEHICLE_CONTROL_PERIOD_MS (20U) /**< 速度 PID 控制周期，单位 ms；50Hz执行。 */
 #define APP_VEHICLE_DEBUG_PERIOD_MS (1000U) /**< 车辆状态串口调试输出周期，单位 ms。 */
 
 #define APP_VOFA_PID_GAIN_MAX (200.0f)      /**< VOFA 在线设置 Kp/Ki/Kd 的安全上限。 */

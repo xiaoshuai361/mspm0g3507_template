@@ -4,12 +4,12 @@
 
 #include "oled.h"
 
-#define MENU_MAIN_ITEM_COUNT (3U) /**< MENU_MAIN_ITEM_COUNT 应用层配置宏。 */
+#define MENU_MAIN_ITEM_COUNT (2U) /**< 一级菜单仅保留任务设置和小车状态。 */
 #define MENU_TASK_ITEM_COUNT (6U) /**< MENU_TASK_ITEM_COUNT 应用层配置宏。 */
 #define MENU_LINE_LENGTH     (16U) /**< MENU_LINE_LENGTH 应用层配置宏。 */
 
 static const char *const mainItems[MENU_MAIN_ITEM_COUNT] = {
-    "Task Setup", "Speed", "Car Status"
+    "Task Setup", "Car Status"
 };
 
 static const char *const taskItems[MENU_TASK_ITEM_COUNT] = {
@@ -74,7 +74,9 @@ void Menu_HandleInput(Menu_State *state, Menu_Input input)
         }
 
         if (input == MENU_INPUT_ENTER) {
-            state->page = (Menu_Page) (MENU_PAGE_TASKS + state->mainSelection);
+            state->page = (state->mainSelection == 0U)
+                              ? MENU_PAGE_TASKS
+                              : MENU_PAGE_STATUS;
             state->dirty = true;
         }
         return;
@@ -199,6 +201,7 @@ void Menu_ReturnToTaskList(Menu_State *state)
 bool Menu_IsDynamicPage(const Menu_State *state)
 {
     return (state->page == MENU_PAGE_MAIN) ||
+           (state->page == MENU_PAGE_TASKS) ||
            (state->page == MENU_PAGE_PARAMETERS) ||
            (state->page == MENU_PAGE_STATUS) ||
            (state->page == MENU_PAGE_TIMER);
@@ -296,7 +299,7 @@ static void Menu_RenderBatteryLine(const Menu_ViewData *data)
  * @brief 渲染一级菜单。
  * @param state 状态枚举值。
  * @param data 数据缓冲区。
- * @note 前三行显示菜单项，第四行固定显示电池电压或低电量提醒。
+ * @note 前两行显示菜单项，第三行显示香橙派就绪状态，第四行显示电池。
  * @retval 无。
  */
 static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
@@ -311,6 +314,7 @@ static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
         Menu_DrawLine(index, line);
     }
 
+    Menu_DrawLine(2U, data->opiBootReady ? "  READY" : "  WAIT OPI");
     Menu_RenderBatteryLine(data);
 }
 
@@ -320,7 +324,8 @@ static void Menu_RenderMain(const Menu_State *state, const Menu_ViewData *data)
  * @note 按 BSP/Module/App 三层结构封装，便于模板工程复用。
  * @retval 无。
  */
-static void Menu_RenderTasks(const Menu_State *state)
+static void Menu_RenderTasks(const Menu_State *state,
+                             const Menu_ViewData *data)
 {
     uint8_t i;
     uint8_t start;  /* 滚动窗口起始索引 */
@@ -338,9 +343,13 @@ static void Menu_RenderTasks(const Menu_State *state)
 
     for (i = 0U; i < MENU_VISIBLE_LINE_COUNT && (start + i) < MENU_TASK_ITEM_COUNT; i++) {
         uint8_t idx = (uint8_t)(start + i);
+        const bool active = (taskCodes[idx] == state->activeTask);
+        const char readyMark = (active && data->taskControlReady &&
+                                data->taskReadyBlinkVisible) ? '*' : ' ';
+
         (void) snprintf(line, sizeof(line), "%c%c %s",
                         (idx == state->taskSelection) ? '>' : ' ',
-                        (taskCodes[idx] == state->activeTask) ? '*' : ' ',
+                        readyMark,
                         taskItems[idx]);
         Menu_DrawLine(i, line);
     }
@@ -448,7 +457,7 @@ void Menu_Render(Menu_State *state, const Menu_ViewData *data)
             Menu_RenderTimer();
             break;
         case MENU_PAGE_TASKS:
-            Menu_RenderTasks(state);
+            Menu_RenderTasks(state, data);
             break;
         case MENU_PAGE_PARAMETERS:
             Menu_RenderParameters(data);

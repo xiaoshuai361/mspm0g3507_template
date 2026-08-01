@@ -24,12 +24,9 @@ uint32_t Menu_RunSelfTest(void)
 
     Menu_Init(&state);
     CHECK(Menu_GetPage(&state) == MENU_PAGE_MAIN);
-    CHECK(Menu_GetMainItemName(1U)[0] == 'S');
-    CHECK(Menu_GetMainItemName(1U)[1] == 'p');
-    CHECK(Menu_GetMainItemName(1U)[2] == 'e');
-    CHECK(Menu_GetMainItemName(1U)[3] == 'e');
-    CHECK(Menu_GetMainItemName(1U)[4] == 'd');
-    CHECK(Menu_GetMainItemName(1U)[5] == '\0');
+    CHECK(Menu_GetMainItemName(1U)[0] == 'C');
+    CHECK(Menu_GetMainItemName(1U)[1] == 'a');
+    CHECK(Menu_GetMainItemName(1U)[2] == 'r');
     CHECK(Menu_GetMainSelection(&state) == 0U);
     CHECK(Menu_GetTaskSelection(&state) == 0U);
     CHECK(Menu_GetActiveTask(&state) == 0U);
@@ -41,7 +38,7 @@ uint32_t Menu_RunSelfTest(void)
     CHECK(!Menu_IsDirty(&state));
 
     Menu_HandleInput(&state, MENU_INPUT_UP);
-    CHECK(Menu_GetMainSelection(&state) == 2U);
+    CHECK(Menu_GetMainSelection(&state) == 1U);
     Menu_HandleInput(&state, MENU_INPUT_DOWN);
     CHECK(Menu_GetMainSelection(&state) == 0U);
 
@@ -89,25 +86,11 @@ uint32_t Menu_RunSelfTest(void)
 
     Menu_HandleInput(&state, MENU_INPUT_DOWN);
     Menu_HandleInput(&state, MENU_INPUT_ENTER);
-    CHECK(Menu_GetPage(&state) == MENU_PAGE_PARAMETERS);
-    CHECK(Menu_IsDynamicPage(&state));
-    Menu_MarkRendered(&state);
-    Menu_HandleInput(&state, MENU_INPUT_UP);
-    Menu_HandleInput(&state, MENU_INPUT_DOWN);
-    Menu_HandleInput(&state, MENU_INPUT_ENTER);
-    CHECK(Menu_GetPage(&state) == MENU_PAGE_PARAMETERS);
-    CHECK(!Menu_IsDirty(&state));
-    Menu_HandleInput(&state, MENU_INPUT_BACK);
-    CHECK(Menu_GetPage(&state) == MENU_PAGE_MAIN);
-    CHECK(Menu_GetMainSelection(&state) == 1U);
-
-    Menu_HandleInput(&state, MENU_INPUT_DOWN);
-    Menu_HandleInput(&state, MENU_INPUT_ENTER);
     CHECK(Menu_GetPage(&state) == MENU_PAGE_STATUS);
     CHECK(Menu_IsDynamicPage(&state));
     Menu_HandleInput(&state, MENU_INPUT_BACK);
     CHECK(Menu_GetPage(&state) == MENU_PAGE_MAIN);
-    CHECK(Menu_GetMainSelection(&state) == 2U);
+    CHECK(Menu_GetMainSelection(&state) == 1U);
 
     OLED_GRAM[0][0] = 0xFFU;
     OLED_GRAM[127][7] = 0xA5U;
@@ -140,12 +123,18 @@ uint32_t Menu_RunSelfTest(void)
     {
         Menu_ViewData viewData = {0};
 
+        viewData.opiBootReady = true;
+        viewData.taskControlReady = true;
+        viewData.taskReadyBlinkVisible = true;
         viewData.carSpeedValid = true;
         viewData.speedValid = true;
         viewData.targetSpeedTenths = 500;
         viewData.actualSpeedTenths = 476;
         viewData.leftSpeedTenths = 510;
         viewData.rightSpeedTenths = 442;
+        CHECK(viewData.opiBootReady == true);
+        CHECK(viewData.taskControlReady == true);
+        CHECK(viewData.taskReadyBlinkVisible == true);
         CHECK(viewData.carSpeedValid);
         CHECK(viewData.speedValid);
         CHECK(viewData.targetSpeedTenths == 500);

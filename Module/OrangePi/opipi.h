@@ -21,7 +21,7 @@
  * 香橙派 → MSPM0 状态
  * ================================================================ */
 #define OPI_STATUS_BOOT_READY      0x01U  /**< 初始化完成，仅发送一次。 */
-#define OPI_STATUS_CONTROL_READY   0x11U  /**< 当前任务稳定就绪（Task3/4/5/6）。 */
+#define OPI_STATUS_CONTROL_READY   0x11U  /**< 当前任务稳定就绪，M0收到后才允许后续动作/发车。 */
 #define OPI_STATUS_TASK3_DONE      0x12U  /**< Task3 的 +5→-5cm 动作完成，继续保持-5cm。 */
 
 /* ================================================================
